@@ -80,11 +80,6 @@ func loadAllSessions() ([]Session, error) {
 		return nil, err
 	}
 
-	// Sort by name descending (timestamp prefix ensures order)
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() > entries[j].Name()
-	})
-
 	var sessions []Session
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
@@ -100,6 +95,12 @@ func loadAllSessions() ([]Session, error) {
 		}
 		sessions = append(sessions, sess)
 	}
+
+	// Sort by last message timestamp descending
+	sort.Slice(sessions, func(i, j int) bool {
+		return lastMessageTime(sessions[i]).After(lastMessageTime(sessions[j]))
+	})
+
 	return sessions, nil
 }
 
@@ -161,7 +162,7 @@ func ListSessions(limit int) {
 			}
 		}
 
-		age := relativeTime(sess.StartedAt)
+		age := relativeTime(lastMessageTime(sess))
 		short := sess.ID[:8]
 
 		fmt.Fprintf(os.Stderr, "%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
@@ -170,6 +171,15 @@ func ListSessions(limit int) {
 	if limit > 0 && total > limit {
 		fmt.Fprintf(os.Stderr, "\n\033[2mshowing %d of %d sessions, use -all to see all\033[0m\n", limit, total)
 	}
+}
+
+func lastMessageTime(s Session) time.Time {
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if !s.Messages[i].Timestamp.IsZero() {
+			return s.Messages[i].Timestamp
+		}
+	}
+	return s.StartedAt
 }
 
 func relativeTime(t time.Time) string {
