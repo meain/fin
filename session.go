@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ const sessionDir = "~/.local/share/fin/sessions"
 
 type Session struct {
 	ID        string    `json:"id"`
+	Title     string    `json:"title"`
 	Model     string    `json:"model"`
 	Cwd       string    `json:"cwd"`
 	StartedAt time.Time `json:"started_at"`
@@ -36,6 +38,7 @@ func SaveSession(model string, messages []Message) error {
 	cwd, _ := os.Getwd()
 	sess := Session{
 		ID:        id,
+		Title:     sessionTitle(messages),
 		Model:     model,
 		Cwd:       cwd,
 		StartedAt: time.Now(),
@@ -48,7 +51,25 @@ func SaveSession(model string, messages []Message) error {
 	}
 
 	filename := fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), id)
+
 	return os.WriteFile(filepath.Join(dir, filename), data, 0644)
+}
+
+// sessionTitle generates a title from the first user message.
+func sessionTitle(messages []Message) string {
+	for _, m := range messages {
+		if m.Role != RoleUser {
+			continue
+		}
+		t := strings.TrimSpace(m.Content)
+		// Collapse whitespace/newlines
+		t = strings.Join(strings.Fields(t), " ")
+		if len(t) > 50 {
+			t = t[:50] + "…"
+		}
+		return t
+	}
+	return ""
 }
 
 // loadAllSessions reads and parses all session files, sorted newest first.
@@ -105,15 +126,34 @@ func LoadLastSession() (*Session, error) {
 	return &sessions[0], nil
 }
 
-// ListSessions prints saved sessions to stderr.
-func ListSessions() {
+// ListSessions prints saved sessions to stderr. limit=-1 for all.
+func ListSessions(limit int) {
 	sessions, err := loadAllSessions()
 	if err != nil || len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
 	}
 
+	total := len(sessions)
+	if limit > 0 && total > limit {
+		sessions = sessions[:limit]
+	}
+
 	for _, sess := range sessions {
+		title := sess.Title
+		if title == "" {
+			// Fallback for old sessions without a title
+			for _, m := range sess.Messages {
+				if m.Role == RoleUser {
+					title = m.Content
+					break
+				}
+			}
+			if len(title) > 50 {
+				title = title[:50] + "…"
+			}
+		}
+
 		msgCount := 0
 		for _, m := range sess.Messages {
 			if m.Role != RoleSystem {
@@ -121,23 +161,27 @@ func ListSessions() {
 			}
 		}
 
-		preview := ""
-		for _, m := range sess.Messages {
-			if m.Role == RoleUser {
-				preview = m.Content
-				break
-			}
-		}
-		if len(preview) > 60 {
-			preview = preview[:60] + "..."
-		}
+		age := relativeTime(sess.StartedAt)
+		short := sess.ID[:8]
 
-		fmt.Fprintf(os.Stderr, "%s  %s  %s  %d msgs  %s\n",
-			sess.ID,
-			sess.StartedAt.Format("2006-01-02 15:04"),
-			sess.Model,
-			msgCount,
-			preview,
-		)
+		fmt.Fprintf(os.Stderr, "%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
+	}
+
+	if limit > 0 && total > limit {
+		fmt.Fprintf(os.Stderr, "\n\033[2mshowing %d of %d sessions, use -all to see all\033[0m\n", limit, total)
+	}
+}
+
+func relativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }

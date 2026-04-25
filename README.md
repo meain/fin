@@ -132,3 +132,10 @@ This is a personal CLI tool optimized for a specific workflow. The architecture 
 ## License
 
 MIT
+
+## Why "fin"?
+
+Two reasons:
+
+1. **Easy to type** — Three letters, easy to remember, fast to invoke
+2. **Final form** — This is the evolved, final form of my [esa agent](https://github.com/meain/esa)

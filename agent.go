@@ -56,7 +56,9 @@ func (a *Agent) run(ctx context.Context) error {
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
-		a.ui.AssistantLabel()
+		if turn == 0 {
+			a.ui.AssistantLabel()
+		}
 
 		req := CompletionRequest{
 			Model:    "", // set by caller via provider

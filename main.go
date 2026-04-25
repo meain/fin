@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,7 +15,9 @@ func main() {
 	cont := flag.Bool("continue", false, "continue last session")
 	resume := flag.String("resume", "", "resume a specific session by UUID")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
+	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
+	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
 	flag.Parse()
 
 	config, err := loadConfig(*configPath)
@@ -26,7 +27,11 @@ func main() {
 	}
 
 	if *sessions {
-		ListSessions()
+		limit := 10
+		if *allSessions {
+			limit = -1
+		}
+		ListSessions(limit)
 		return
 	}
 
@@ -56,19 +61,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	ui := NewUI()
-
-	// Discover skills (progressive disclosure: only name+description loaded)
-	skills := DiscoverSkills(config)
-	if len(skills) > 0 {
-		ui.Info(fmt.Sprintf("found %d skill(s)", len(skills)))
+	// Determine output mode (flag overrides config)
+	outMode := parseOutputMode(config.Settings.UI)
+	if *uiMode != "" {
+		outMode = parseOutputMode(*uiMode)
 	}
 
-	agent := NewAgent(provider, config, ui, skills)
+	// Discover skills
+	skills := DiscoverSkills(config)
 
-	// The provider doesn't know the model — we inject it into requests.
-	// We need to patch the agent to set the model on each request.
-	// For now, wrap the provider to inject the model.
+	ui := NewUI(nil, outMode)
+	agent := NewAgent(provider, config, ui, skills)
 	agent.provider = &modelInjector{provider: provider, model: modelName}
 
 	// Resume session if requested
@@ -88,54 +91,22 @@ func main() {
 		ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
 	}
 
+	// Require a prompt
+	args := flag.Args()
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: fin [flags] \"prompt\"\n")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// One-shot mode: fin "prompt"
-	args := flag.Args()
-	if len(args) > 0 {
-		prompt := strings.Join(args, " ")
-		if err := agent.AddUserMessage(ctx, prompt); err != nil {
-			ui.Error(err.Error())
-			os.Exit(1)
-		}
-		_ = SaveSession(modelStr, agent.Messages())
-		return
+	prompt := strings.Join(args, " ")
+	if err := agent.AddUserMessage(ctx, prompt); err != nil {
+		ui.Error(err.Error())
+		os.Exit(1)
 	}
-
-	// REPL mode
-	ui.Info(fmt.Sprintf("fin — %s/%s", providerName, modelName))
-	ui.Info("type /quit to exit")
-
-	input := NewStdinInput()
-	for {
-		ui.UserPrompt()
-		line, err := input.ReadLine("")
-		if err != nil {
-			if err == io.EOF {
-				fmt.Fprintln(os.Stderr)
-				break
-			}
-			ui.Error(err.Error())
-			break
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if line == "/quit" || line == "/exit" {
-			break
-		}
-
-		if err := agent.AddUserMessage(ctx, line); err != nil {
-			ui.Error(err.Error())
-			if ctx.Err() != nil {
-				break
-			}
-		}
-	}
-
 	_ = SaveSession(modelStr, agent.Messages())
 }
 
