@@ -45,6 +45,11 @@ fin -yolo "refactor this file"
 # Output modes
 fin -ui minimal "what is in go.mod"   # compact tool display
 fin -ui quiet "summarize this file"   # only response text on stdout
+
+# Piped input
+git diff | fin "review this diff"
+cat error.log | fin "what went wrong"
+echo "func add(a, b int) string { return a + b }" | fin "fix this"
 ```
 
 ### Examples
@@ -120,7 +125,7 @@ deny = ["rm -rf *", "sudo *"]
 
 ## Available Tools
 
-- **read**: Read file contents with optional line ranges
+- **read**: Read files, images (png/jpg/gif/webp), or directory trees
 - **write**: Create or overwrite files
 - **edit**: Surgical string replacement in files
 - **shell**: Execute shell commands via `sh -c`

@@ -14,7 +14,7 @@ Single `main` package. All files are in the repo root.
 - `provider_openai.go` — OpenAI-compatible API (raw HTTP + SSE streaming)
 - `agent.go` — Agent loop: stream response, accumulate tool calls, execute, repeat
 - `tool.go` — Tool interface, registry, AllTools()
-- `tool_read.go` — Read file with line numbers, or directory tree
+- `tool_read.go` — Read file with line numbers, images (base64 for vision), or directory tree
 - `tool_write.go` — Write/create files (expands `~`)
 - `tool_edit.go` — Exact string replacement in files (expands `~`)
 - `tool_shell.go` — Shell command execution via `sh -c`
@@ -30,7 +30,10 @@ Single `main` package. All files are in the repo root.
 
 - No sub-packages. Everything is `package main`.
 - Raw HTTP for all LLM providers — no provider SDKs.
-- Minimal deps: `BurntSushi/toml`, `google/uuid`, `gopkg.in/yaml.v3`, `yuin/goldmark`, `golang.org/x/term`. Avoid adding more unless necessary.
+- Minimal deps: `BurntSushi/toml`, `google/uuid`, `gopkg.in/yaml.v3`, `yuin/goldmark`, `golang.org/x/term`. Avoid adding more.
+- Tools return `ToolResult` (Content string + optional Images) — not bare strings.
+- Piped stdin is detected and prepended to the prompt.
+- Rate limit (429) and server errors (5xx) are retried with exponential backoff + jitter (max 3 retries).
 - ANSI escape codes directly — no color/TUI libraries.
 - Tools implement the `Tool` interface (Name, Description, Parameters, Run).
 - Provider-agnostic message types in `message.go` — each provider converts to/from its own wire format.
