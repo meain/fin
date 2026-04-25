@@ -18,6 +18,8 @@ func main() {
 	flag.StringVar(resume, "r", "", "resume a specific session by UUID (short)")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
+	export := flag.String("export", "", "export session as JSON (by UUID, or 'last')")
+	exportHTML := flag.String("export-html", "", "export session as HTML (by UUID, or 'last')")
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
 	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
 	flag.Parse()
@@ -34,6 +36,30 @@ func main() {
 			limit = -1
 		}
 		ListSessions(limit)
+		return
+	}
+
+	if *export != "" || *exportHTML != "" {
+		id := *export
+		if id == "" {
+			id = *exportHTML
+		}
+		var sess *Session
+		var err error
+		if id == "last" {
+			sess, err = LoadLastSession()
+		} else {
+			sess, err = LoadSessionByID(id)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		if *exportHTML != "" {
+			ExportHTML(sess, os.Stdout)
+		} else {
+			ExportJSON(sess, os.Stdout)
+		}
 		return
 	}
 
