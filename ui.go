@@ -31,10 +31,11 @@ const (
 )
 
 type UI struct {
-	term        *Terminal
-	mode        OutputMode
-	wroteText   bool // tracks if text was written since last newline
-	hasProgress bool // tracks if a progress line is showing
+	term              *Terminal
+	mode              OutputMode
+	wroteText         bool // tracks if text was written since last newline
+	hasProgress       bool // tracks if a progress line is showing
+	lastProgressLines int  // last line count shown in progress (for throttling)
 }
 
 func parseOutputMode(s string) OutputMode {
@@ -107,21 +108,30 @@ func (u *UI) ToolCallProgress(name, argsSoFar string) {
 		return
 	}
 
+	// Throttle: only update if line count changed
+	if lines == u.lastProgressLines {
+		return
+	}
+	u.lastProgressLines = lines
+
 	if !u.hasProgress {
 		u.ensureNewline()
 	}
 
-	fmt.Fprintf(stderr, "\033[2K\r%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
+	fmt.Fprintf(stderr, "\r\033[2K%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
+	stderr.Sync()
 	u.hasProgress = true
 }
 
 // ToolCallStart shows a tool being invoked.
 func (u *UI) ToolCallStart(name string, args map[string]any) {
 	if u.hasProgress {
-		fmt.Fprint(stderr, "\033[2K\r") // clear the progress line
+		fmt.Fprint(stderr, "\033[2K\r")
 		u.hasProgress = false
+		u.lastProgressLines = 0
+	} else {
+		u.ensureNewline()
 	}
-	u.ensureNewline()
 	if u.mode == OutputQuiet {
 		return
 	}
@@ -182,21 +192,27 @@ func (u *UI) toolCallMinimal(name string, args map[string]any) {
 	switch name {
 	case "shell":
 		cmd, _ := args["command"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s$ %s%s\n", yellow, name, reset, dim, cmd, reset)
+		fmt.Fprintf(stderr, "%s%s%s %s$ %s%s", yellow, name, reset, dim, cmd, reset)
 	case "read":
 		path, _ := args["path"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s\n", yellow, name, reset, dim, path, reset)
+		fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, path, reset)
 	case "write":
 		path, _ := args["path"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s\n", yellow, name, reset, dim, path, reset)
+		content, _ := args["content"].(string)
+		lines := strings.Count(content, "\n") + 1
+		fmt.Fprintf(stderr, "%s%s%s %s%s (%d lines)%s", yellow, name, reset, dim, path, lines, reset)
 	case "edit":
 		path, _ := args["path"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s\n", yellow, name, reset, dim, path, reset)
+		old, _ := args["old_string"].(string)
+		nw, _ := args["new_string"].(string)
+		oldLines := strings.Count(old, "\n") + 1
+		newLines := strings.Count(nw, "\n") + 1
+		fmt.Fprintf(stderr, "%s%s%s %s%s (-%d +%d lines)%s", yellow, name, reset, dim, path, oldLines, newLines, reset)
 	case "use_skill":
 		skill, _ := args["name"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s\n", yellow, name, reset, dim, skill, reset)
+		fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, skill, reset)
 	default:
-		fmt.Fprintf(stderr, "%s%s%s\n", yellow, name, reset)
+		fmt.Fprintf(stderr, "%s%s%s", yellow, name, reset)
 	}
 }
 
@@ -207,7 +223,16 @@ func (u *UI) ToolCallResult(result string, err error) {
 	}
 	if u.mode == OutputMinimal {
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
+			fmt.Fprintf(stderr, " %serror: %s%s\n", red, err, reset)
+		} else if result != "" {
+			lines := strings.Count(result, "\n")
+			if lines > 0 {
+				fmt.Fprintf(stderr, " %s(%d lines)%s\n", dim, lines, reset)
+			} else {
+				fmt.Fprintln(stderr)
+			}
+		} else {
+			fmt.Fprintln(stderr)
 		}
 		return
 	}
