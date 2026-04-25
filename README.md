@@ -4,12 +4,14 @@ Opinionated CLI agent harness in Go
 
 ## Features
 
-- **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs
-- **Tool execution**: File operations, shell commands, and extensible skill system
-- **Session persistence**: Resume conversations across CLI invocations
-- **Export capabilities**: JSON, HTML, and message-only export formats
-- **Flexible UI modes**: Default, minimal, and quiet output modes
-- **Configurable approval**: Auto-approve, confirm, or deny tool execution per tool type
+- **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs via raw HTTP
+- **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees
+- **Agent skills**: [agentskills.io](https://agentskills.io) spec — progressive disclosure, project and global skills
+- **Session persistence**: Incremental saves, resume, export as JSON/HTML/message
+- **Piped input**: `git diff | fin "review this"`
+- **Output modes**: Default (full ANSI), minimal (one-line tool summaries), quiet (stdout only)
+- **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
+- **Retry with backoff**: Automatic retry on rate limits and server errors
 
 ## Installation
 
@@ -26,14 +28,13 @@ fin "explain this code"
 # Session management
 fin -sessions              # list last 10 sessions
 fin -all -sessions         # list all sessions
-fin -continue "follow up"  # continue last session
-fin -c "follow up"         # short form
-fin -s <uuid> "follow up"  # continue specific session
+fin -c "follow up"         # continue last session
+fin -s <uuid> "follow up"  # continue specific session (prefix match)
 
 # Export sessions
 fin -export json           # export last session as JSON
-fin -export html           # export last session as HTML
-fin -export message        # export just the last response text
+fin -export html           # export as HTML with rendered markdown
+fin -export message        # just the last response text
 fin -s <uuid> -export html # export specific session
 
 # Model selection
@@ -54,23 +55,22 @@ echo "func add(a, b int) string { return a + b }" | fin "fix this"
 
 ### Examples
 
-Minimal mode shows tool names, their key argument, and the response:
+Minimal mode shows tool names, their key argument, and line counts:
 
 ```
-$ fin -ui minimal "what is in go.mod? be brief"
-read go.mod
+$ fin "what is in go.mod? be brief"
+read go.mod (14 lines)
 Go 1.25.7, minimal deps: BurntSushi/toml, google/uuid, yuin/goldmark, golang.org/x/term, gopkg.in/yaml.v3.
 ```
 
-Export just the last assistant response with `-export message`:
+Export the last response for use with other tools:
 
 ```
 $ fin -export message | pbcopy           # copy to clipboard
 $ fin -export message | glow             # render markdown in terminal
-$ fin "summarize this" && fin -export message > summary.txt
 ```
 
-Skills activate automatically when the task matches. Here fin activates the `jira` skill to look up tickets:
+Skills activate automatically when the task matches:
 
 ```
 $ fin "what tickets are assigned to me?"
@@ -125,42 +125,35 @@ deny = ["rm -rf *", "sudo *"]
 
 ## Available Tools
 
-- **read**: Read files, images (png/jpg/gif/webp), or directory trees
-- **write**: Create or overwrite files
-- **edit**: Surgical string replacement in files
-- **shell**: Execute shell commands via `sh -c`
+- **read**: Read files (with line ranges), images (png/jpg/gif/webp for vision), or directory trees
+- **write**: Create or overwrite files (creates parent directories)
+- **edit**: Exact string replacement in files (old_string must be unique)
+- **shell**: Execute commands via `sh -c` (stdout and stderr returned separately)
 - **use_skill**: Activate agent skills for specialized workflows
 
-## Skills System
+## Skills
 
-Skills provide specialized agent workflows with progressive disclosure. Place skill definitions in:
+Skills follow the [agentskills.io](https://agentskills.io) spec with progressive disclosure — only names and descriptions load at startup, full instructions load on activation. Place skills in:
 
-- `~/.agents/skills/` (global skills)
-- `.agents/skills/` (project-specific skills)
+- `~/.agents/skills/` (global)
+- `.agents/skills/` (project-specific, walks up to root)
 
-Each skill has a `SKILL.md` with triggers, description, and full instructions.
+Builtin skills are embedded in the binary (e.g. `about-fin`).
 
 ## Agent Instructions
 
-The system prompt is assembled from:
+The system prompt is assembled from layers:
 
-1. Base agent instructions
-2. `~/.agents/AGENTS.md` (global)
-3. Project `.agents/AGENTS.md` 
-4. Activated skills
+1. Base prompt (embedded `system_prompt.md`)
+2. Runtime context (date, OS, working directory)
+3. Available skills (names + descriptions)
+4. `~/.agents/AGENTS.md` (global user instructions)
+5. Project `AGENTS.md` (walks up from cwd)
 
 ## Session Storage
 
-Conversations are saved to `~/.local/share/fin/sessions/` as JSON files with UUIDs. Sessions include full message history and can be resumed at any time.
+Sessions are saved incrementally to `~/.local/share/fin/sessions/` as JSON files. Each session has a UUID, auto-generated title, and per-message timestamps. Sessions are saved after every agent turn so nothing is lost if killed mid-execution.
 
-## Tool Approval Levels
-
-- `auto` — Execute without prompting
-- `confirm` — Ask for approval (default)
-- `deny` — Block execution
-
-Configure per tool type in `config.toml`.
-
-> What is with the name "fin":
-> 1. **Easy to type** — Three letters, easy to remember, fast to invoke
-> 2. **Final form** — This is the evolved, final form of my [esa agent](https://github.com/meain/esa)
+> Why "fin"?
+> 1. **Easy to type** — three letters, fast to invoke
+> 2. **Final form** — evolved from my [esa agent](https://github.com/meain/esa)

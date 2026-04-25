@@ -4,47 +4,47 @@ Opinionated CLI agent harness in Go. Minimal dependencies, raw HTTP to LLM provi
 
 ## Architecture
 
-Single `main` package. All files are in the repo root.
+Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal packages hold the reusable parts.
 
-- `main.go` — Entry point, flag parsing, one-shot execution
-- `config.go` — TOML config (`~/.config/fin/config.toml`), model alias resolution
-- `message.go` — Provider-agnostic message types (Message, ToolCall, StreamDelta, CompletionRequest). Each message has a Timestamp.
-- `provider.go` — Provider interface, factory, header transport
-- `provider_anthropic.go` — Anthropic Messages API (raw HTTP + SSE streaming)
-- `provider_openai.go` — OpenAI-compatible API (raw HTTP + SSE streaming)
-- `agent.go` — Agent loop: stream response, accumulate tool calls, execute, repeat
-- `tool.go` — Tool interface, registry, AllTools()
-- `tool_read.go` — Read file with line numbers, images (base64 for vision), or directory tree
-- `tool_write.go` — Write/create files (expands `~`)
-- `tool_edit.go` — Exact string replacement in files (expands `~`)
-- `tool_shell.go` — Shell command execution via `sh -c`
-- `tool_skill.go` — Activate agent skills (progressive disclosure)
-- `skill.go` — Skill discovery (follows symlinks) and SKILL.md YAML frontmatter parsing
-- `prompt.go` — System prompt assembly (base + ~/.agents/AGENTS.md + project AGENTS.md + skills)
-- `session.go` — Conversation persistence to ~/.local/share/fin/sessions/ with UUID, title, timestamps
-- `export.go` — Export sessions as JSON, HTML (with markdown rendering, diff views, foldable tool results), or last message
-- `ui.go` — Terminal output with 3 modes (default/minimal/quiet), ANSI colors, streaming, tool call display, diffs
-- `input.go` — Terminal input with x/term raw mode, stdin mux for type-ahead, Esc/Ctrl+C cancellation
+### Root files
+- `main.go` — Entry point, flag parsing, session management, piped stdin
+- `agent.go` — Agent loop (stream → tool calls → execute → repeat), retry with backoff, tool approval
+- `config.go` — TOML config (`~/.config/fin/config.toml`), model alias resolution, validation
+- `prompt.go` — System prompt assembly (embedded base + runtime context + skills + AGENTS.md layers)
+- `session.go` — Incremental session persistence with UUID, title, per-message timestamps
+- `export.go` — Export as JSON, HTML (markdown rendering, foldable tool results, edit diffs), or last message
+- `skill.go` — Skill discovery from .agents/skills/ (project + parents + global), follows symlinks, YAML frontmatter
+- `ui.go` — Terminal output: 3 modes (default/minimal/quiet), ANSI colors, live progress, line counts
+- `input.go` — x/term raw mode, stdin multiplexer for type-ahead during execution, Esc/Ctrl+C cancellation
+- `embed.go` — Embeds `system_prompt.md` and `skills/` directory
+
+### Internal packages
+- `internal/types/` — Shared types: Message, ToolCall, StreamDelta, CompletionRequest, ToolDef, ToolResult, Image, ExpandHome
+- `internal/provider/` — Provider interface + Anthropic (raw HTTP + SSE) and OpenAI-compatible implementations
+- `internal/tool/` — Tool interface + read, write, edit, shell, skill tools
+
+### Embedded files
+- `system_prompt.md` — Base system prompt
+- `skills/about-fin/SKILL.md` — Builtin skill describing fin itself
 
 ## Conventions
 
-- No sub-packages. Everything is `package main`.
-- Raw HTTP for all LLM providers — no provider SDKs.
-- Minimal deps: `BurntSushi/toml`, `google/uuid`, `gopkg.in/yaml.v3`, `yuin/goldmark`, `golang.org/x/term`. Avoid adding more.
-- Tools return `ToolResult` (Content string + optional Images) — not bare strings.
-- Piped stdin is detected and prepended to the prompt.
-- Rate limit (429) and server errors (5xx) are retried with exponential backoff + jitter (max 3 retries).
-- ANSI escape codes directly — no color/TUI libraries.
-- Tools implement the `Tool` interface (Name, Description, Parameters, Run).
-- Provider-agnostic message types in `message.go` — each provider converts to/from its own wire format.
-- `expandHome()` in `config.go` handles `~/` paths — use it in tools that accept file paths.
+- Raw HTTP for all LLM providers — no provider SDKs
+- Minimal deps: `BurntSushi/toml`, `google/uuid`, `gopkg.in/yaml.v3`, `yuin/goldmark`, `golang.org/x/term`
+- Tools return `ToolResult` (Content + optional Images)
+- Types shared across packages live in `internal/types/`
+- `types.ExpandHome()` handles `~/` paths — use it in tools that accept file paths
+- Piped stdin is detected and prepended to the prompt
+- Rate limits (429) and server errors (5xx) retried with exponential backoff + jitter (max 3)
+- ANSI escape codes directly — no color/TUI libraries
+- System prompt and builtin skills are embedded markdown files
 
 ## CLI flags
 
 ```
 fin "prompt"                    # run with prompt
 fin -c "follow up"              # continue last session
-fin -s <uuid> "follow up"      # continue specific session (prefix match works)
+fin -s <uuid> "follow up"      # continue specific session (prefix match)
 fin -sessions                   # list last 10 sessions
 fin -all -sessions              # list all sessions
 fin -export json|html|message   # export session (uses -s for specific, else last)
@@ -55,7 +55,7 @@ fin -yolo                       # auto-approve all tools
 
 ## Config
 
-TOML at `~/.config/fin/config.toml`. Key sections:
+TOML at `~/.config/fin/config.toml`:
 
 - `[settings]` — `default_model`, `project_file`, `max_turns`, `yolo`, `ui`
 - `[model_aliases]` — short names mapping to `provider/model`
@@ -64,14 +64,19 @@ TOML at `~/.config/fin/config.toml`. Key sections:
 
 ## Adding a new provider
 
-1. Create `provider_name.go` implementing the `Provider` interface
-2. Add a case in `NewProvider()` in `provider.go`
-3. The provider must handle SSE streaming and convert to/from `message.go` types
+1. Create `internal/provider/name.go` implementing the `Provider` interface
+2. Add a case in `New()` in `internal/provider/provider.go`
+3. The provider must handle SSE streaming and convert to/from `types.Message` / `types.StreamDelta`
 
 ## Adding a new tool
 
-1. Create `tool_name.go` implementing the `Tool` interface (Name, Description, Parameters, Run)
-2. Add it to `AllTools()` in `tool.go`
+1. Create `internal/tool/name.go` implementing the `Tool` interface (Name, Description, Parameters, Run returning ToolResult)
+2. Add it to `BuiltinTools()` in `internal/tool/tool.go`
 3. Add a default approval level in `defaultConfig()` in `config.go`
 4. Add display handling in `ToolCallStart` and `toolCallMinimal` in `ui.go`
 5. If it needs special HTML export rendering, add handling in `renderToolCall` in `export.go`
+
+## Adding a builtin skill
+
+1. Create `skills/<name>/SKILL.md` with YAML frontmatter (name, description) and markdown body
+2. It gets embedded automatically via `embed.go` and loaded in `agent.go`'s `loadBuiltinSkills()`
