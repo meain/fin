@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 // Role represents the sender of a message in a conversation.
 type Role string
 
@@ -16,6 +18,7 @@ type Message struct {
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Timestamp  time.Time  `json:"timestamp,omitempty"`
 }
 
 // ToolCall represents a tool invocation requested by the model.

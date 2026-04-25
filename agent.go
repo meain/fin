@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Agent orchestrates the conversation loop between user, LLM, and tools.
@@ -45,7 +46,7 @@ func (a *Agent) Messages() []Message {
 
 // AddUserMessage adds a user message and runs the agent loop.
 func (a *Agent) AddUserMessage(ctx context.Context, content string) error {
-	a.messages = append(a.messages, Message{Role: RoleUser, Content: content})
+	a.messages = append(a.messages, Message{Role: RoleUser, Content: content, Timestamp: time.Now()})
 	return a.run(ctx)
 }
 
@@ -101,6 +102,7 @@ func (a *Agent) run(ctx context.Context) error {
 				Role:       RoleTool,
 				ToolCallID: tc.ID,
 				Content:    content,
+				Timestamp:  time.Now(),
 			})
 		}
 	}
@@ -110,7 +112,7 @@ func (a *Agent) run(ctx context.Context) error {
 
 // consumeStream reads the full streaming response, printing text and accumulating tool calls.
 func (a *Agent) consumeStream(stream Stream) (Message, error) {
-	msg := Message{Role: RoleAssistant}
+	msg := Message{Role: RoleAssistant, Timestamp: time.Now()}
 	var contentBuf strings.Builder
 
 	// Track in-progress tool calls by index
