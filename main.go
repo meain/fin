@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -123,9 +124,19 @@ func main() {
 		ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
 	}
 
-	// Require a prompt
+	// Build prompt from args + piped stdin
 	args := flag.Args()
-	if len(args) == 0 {
+
+	var pipedInput string
+	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
+		// stdin is a pipe, not a terminal
+		data, err := io.ReadAll(os.Stdin)
+		if err == nil && len(data) > 0 {
+			pipedInput = string(data)
+		}
+	}
+
+	if len(args) == 0 && pipedInput == "" {
 		fmt.Fprintf(os.Stderr, "usage: fin [flags] \"prompt\"\n")
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -135,6 +146,13 @@ func main() {
 	defer cancel()
 
 	prompt := strings.Join(args, " ")
+	if pipedInput != "" {
+		if prompt != "" {
+			prompt = prompt + "\n\n" + pipedInput
+		} else {
+			prompt = pipedInput
+		}
+	}
 	if err := agent.AddUserMessage(ctx, prompt); err != nil {
 		ui.Error(err.Error())
 		os.Exit(1)
