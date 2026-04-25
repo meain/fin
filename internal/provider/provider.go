@@ -1,25 +1,34 @@
-package main
+package provider
 
 import (
 	"context"
 	"fmt"
 	"net/http"
 	"os"
+
+	t "github.com/meain/fin/internal/types"
 )
 
 // Provider sends messages to an LLM and returns a streaming response.
 type Provider interface {
-	StreamCompletion(ctx context.Context, req CompletionRequest) (Stream, error)
+	StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error)
 }
 
 // Stream yields deltas from a streaming completion.
 type Stream interface {
-	Recv() (StreamDelta, error)
+	Recv() (t.StreamDelta, error)
 	Close()
 }
 
-// NewProvider creates the appropriate provider for the given provider name.
-func NewProvider(name string, cfg ProviderConfig) (Provider, error) {
+// Config holds provider connection settings.
+type Config struct {
+	BaseURL   string
+	APIKeyEnv string
+	Headers   map[string]string
+}
+
+// New creates the appropriate provider for the given provider name.
+func New(name string, cfg Config) (Provider, error) {
 	apiKey := os.Getenv(cfg.APIKeyEnv)
 	if cfg.APIKeyEnv != "" && apiKey == "" {
 		return nil, fmt.Errorf("env var %s not set", cfg.APIKeyEnv)
@@ -39,7 +48,6 @@ func NewProvider(name string, cfg ProviderConfig) (Provider, error) {
 	case "anthropic":
 		return newAnthropicProvider(apiKey, cfg.BaseURL, httpClient), nil
 	default:
-		// Everything else is OpenAI-compatible
 		return newOpenAIProvider(apiKey, cfg.BaseURL, httpClient), nil
 	}
 }
@@ -49,9 +57,9 @@ type headerTransport struct {
 	base    http.RoundTripper
 }
 
-func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	for k, v := range t.headers {
+func (tr *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	for k, v := range tr.headers {
 		req.Header.Set(k, v)
 	}
-	return t.base.RoundTrip(req)
+	return tr.base.RoundTrip(req)
 }

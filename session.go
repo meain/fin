@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	t "github.com/meain/fin/internal/types"
 )
 
 const sessionDir = "~/.local/share/fin/sessions"
@@ -20,7 +21,7 @@ type Session struct {
 	Model     string    `json:"model"`
 	Cwd       string    `json:"cwd"`
 	StartedAt time.Time `json:"started_at"`
-	Messages  []Message `json:"messages"`
+	Messages  []t.Message `json:"messages"`
 }
 
 func sessionPath() string {
@@ -81,7 +82,7 @@ func SessionWriterForExisting(sess *Session) *SessionWriter {
 }
 
 // Save writes the current messages to disk.
-func (sw *SessionWriter) Save(messages []Message) error {
+func (sw *SessionWriter) Save(messages []t.Message) error {
 	sess := Session{
 		ID:        sw.id,
 		Title:     sessionTitle(messages),
@@ -100,9 +101,9 @@ func (sw *SessionWriter) Save(messages []Message) error {
 }
 
 // sessionTitle generates a title from the first user message.
-func sessionTitle(messages []Message) string {
+func sessionTitle(messages []t.Message) string {
 	for _, m := range messages {
-		if m.Role != RoleUser {
+		if m.Role != t.RoleUser {
 			continue
 		}
 		t := strings.TrimSpace(m.Content)
@@ -189,7 +190,7 @@ func ListSessions(limit int) {
 		if title == "" {
 			// Fallback for old sessions without a title
 			for _, m := range sess.Messages {
-				if m.Role == RoleUser {
+				if m.Role == t.RoleUser {
 					title = m.Content
 					break
 				}
@@ -201,7 +202,7 @@ func ListSessions(limit int) {
 
 		msgCount := 0
 		for _, m := range sess.Messages {
-			if m.Role != RoleSystem {
+			if m.Role != t.RoleSystem {
 				msgCount++
 			}
 		}

@@ -1,4 +1,4 @@
-package main
+package provider
 
 import (
 	"bufio"
@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	t "github.com/meain/fin/internal/types"
 )
 
 const (
@@ -50,12 +52,12 @@ type anthMessage struct {
 }
 
 type anthContentBlock struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
+	Type      string           `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Input     any              `json:"input,omitempty"`
+	ToolUseID string           `json:"tool_use_id,omitempty"`
 	Content   any              `json:"content,omitempty"`
 	IsError   bool             `json:"is_error,omitempty"`
 	Source    *anthImageSource `json:"source,omitempty"`
@@ -103,16 +105,16 @@ type anthErrorEvent struct {
 
 // --- Conversion: Message -> anthMessage ---
 
-func messagesToAnthropic(msgs []Message) (system string, anthMsgs []anthMessage) {
+func messagesToAnthropic(msgs []t.Message) (system string, anthMsgs []anthMessage) {
 	for _, m := range msgs {
 		switch m.Role {
-		case RoleSystem:
+		case t.RoleSystem:
 			system = m.Content
 
-		case RoleUser:
+		case t.RoleUser:
 			anthMsgs = append(anthMsgs, anthMessage{Role: "user", Content: m.Content})
 
-		case RoleAssistant:
+		case t.RoleAssistant:
 			if len(m.ToolCalls) > 0 {
 				var blocks []anthContentBlock
 				if m.Content != "" {
@@ -138,7 +140,7 @@ func messagesToAnthropic(msgs []Message) (system string, anthMsgs []anthMessage)
 				anthMsgs = append(anthMsgs, anthMessage{Role: "assistant", Content: m.Content})
 			}
 
-		case RoleTool:
+		case t.RoleTool:
 			var block anthContentBlock
 			if len(m.Images) > 0 {
 				// Tool result with images: use content array with image blocks
@@ -192,13 +194,13 @@ func messagesToAnthropic(msgs []Message) (system string, anthMsgs []anthMessage)
 	return
 }
 
-func toolDefsToAnthropic(tools []ToolDef) []anthTool {
+func toolDefsToAnthropic(tools []t.ToolDef) []anthTool {
 	out := make([]anthTool, len(tools))
-	for i, t := range tools {
+	for i, td := range tools {
 		out[i] = anthTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.Parameters,
+			Name:        td.Name,
+			Description: td.Description,
+			InputSchema: td.Parameters,
 		}
 	}
 	return out
@@ -206,7 +208,7 @@ func toolDefsToAnthropic(tools []ToolDef) []anthTool {
 
 // --- StreamCompletion ---
 
-func (p *anthropicProvider) StreamCompletion(ctx context.Context, req CompletionRequest) (Stream, error) {
+func (p *anthropicProvider) StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error) {
 	system, anthMsgs := messagesToAnthropic(req.Messages)
 	anthTools := toolDefsToAnthropic(req.Tools)
 
@@ -264,10 +266,10 @@ func (s *anthropicStream) Close() {
 	}
 }
 
-func (s *anthropicStream) Recv() (StreamDelta, error) {
+func (s *anthropicStream) Recv() (t.StreamDelta, error) {
 	for {
 		if s.done {
-			return StreamDelta{}, io.EOF
+			return t.StreamDelta{}, io.EOF
 		}
 
 		eventType, data, err := readSSEEvent(s.reader)
@@ -275,7 +277,7 @@ func (s *anthropicStream) Recv() (StreamDelta, error) {
 			if err == io.EOF {
 				s.done = true
 			}
-			return StreamDelta{}, err
+			return t.StreamDelta{}, err
 		}
 		if eventType == "" || data == "" {
 			continue
@@ -289,8 +291,8 @@ func (s *anthropicStream) Recv() (StreamDelta, error) {
 			}
 			if ev.ContentBlock.Type == "tool_use" {
 				s.toolCallID = ev.ContentBlock.ID
-				return StreamDelta{
-					ToolCalls: []ToolCallDelta{{
+				return t.StreamDelta{
+					ToolCalls: []t.ToolCallDelta{{
 						Index: ev.Index,
 						ID:    ev.ContentBlock.ID,
 						Name:  ev.ContentBlock.Name,
@@ -305,10 +307,10 @@ func (s *anthropicStream) Recv() (StreamDelta, error) {
 			}
 			switch ev.Delta.Type {
 			case "text_delta":
-				return StreamDelta{Content: ev.Delta.Text}, nil
+				return t.StreamDelta{Content: ev.Delta.Text}, nil
 			case "input_json_delta":
-				return StreamDelta{
-					ToolCalls: []ToolCallDelta{{
+				return t.StreamDelta{
+					ToolCalls: []t.ToolCallDelta{{
 						Index:     ev.Index,
 						Arguments: ev.Delta.PartialJSON,
 					}},
@@ -320,14 +322,14 @@ func (s *anthropicStream) Recv() (StreamDelta, error) {
 
 		case "message_stop":
 			s.done = true
-			return StreamDelta{}, io.EOF
+			return t.StreamDelta{}, io.EOF
 
 		case "error":
 			var ev anthErrorEvent
 			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				return StreamDelta{}, fmt.Errorf("anthropic stream error: %s", data)
+				return t.StreamDelta{}, fmt.Errorf("anthropic stream error: %s", data)
 			}
-			return StreamDelta{}, fmt.Errorf("anthropic error: %s: %s", ev.Error.Type, ev.Error.Message)
+			return t.StreamDelta{}, fmt.Errorf("anthropic error: %s: %s", ev.Error.Type, ev.Error.Message)
 		}
 	}
 }

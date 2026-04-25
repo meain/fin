@@ -10,46 +10,67 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/meain/fin/internal/provider"
+	"github.com/meain/fin/internal/tool"
+	t "github.com/meain/fin/internal/types"
 )
 
 // Agent orchestrates the conversation loop between user, LLM, and tools.
 type Agent struct {
-	provider Provider
-	tools    []Tool
+	provider provider.Provider
+	tools    []tool.Tool
 	config   *Config
 	ui       *UI
-	messages []Message
-	OnUpdate func([]Message) // called after each turn so the session can be saved
+	messages []t.Message
+	OnUpdate func([]t.Message)
 }
 
-func NewAgent(provider Provider, config *Config, ui *UI, skills []*Skill) *Agent {
-	tools := AllTools(skills)
+func NewAgent(p provider.Provider, config *Config, ui *UI, skills []*Skill) *Agent {
+	tools := buildTools(skills)
 	systemPrompt := buildSystemPrompt(config, skills)
 
 	return &Agent{
-		provider: provider,
+		provider: p,
 		tools:    tools,
 		config:   config,
 		ui:       ui,
-		messages: []Message{
-			{Role: RoleSystem, Content: systemPrompt},
+		messages: []t.Message{
+			{Role: t.RoleSystem, Content: systemPrompt},
 		},
 	}
 }
 
+func buildTools(skills []*Skill) []tool.Tool {
+	tools := tool.BuiltinTools()
+	if len(skills) > 0 {
+		entries := make([]tool.SkillEntry, len(skills))
+		for i, s := range skills {
+			entries[i] = tool.SkillEntry{
+				Name:          s.Name,
+				Description:   s.Description,
+				Compatibility: s.Compatibility,
+				Dir:           s.Dir,
+			}
+		}
+		tools = append(tools, &tool.SkillTool{Skills: entries})
+	}
+	return tools
+}
+
 // SetMessages restores messages (e.g., from a persisted session).
-func (a *Agent) SetMessages(msgs []Message) {
+func (a *Agent) SetMessages(msgs []t.Message) {
 	a.messages = msgs
 }
 
 // Messages returns the current conversation.
-func (a *Agent) Messages() []Message {
+func (a *Agent) Messages() []t.Message {
 	return a.messages
 }
 
 // AddUserMessage adds a user message and runs the agent loop.
 func (a *Agent) AddUserMessage(ctx context.Context, content string) error {
-	a.messages = append(a.messages, Message{Role: RoleUser, Content: content, Timestamp: time.Now()})
+	a.messages = append(a.messages, t.Message{Role: t.RoleUser, Content: content, Timestamp: time.Now()})
 	return a.run(ctx)
 }
 
@@ -64,10 +85,10 @@ func (a *Agent) run(ctx context.Context) error {
 			a.ui.AssistantLabel()
 		}
 
-		req := CompletionRequest{
-			Model:    "", // set by caller via provider
+		req := t.CompletionRequest{
+			Model:    "",
 			Messages: a.messages,
-			Tools:    ToolDefsFrom(a.tools),
+			Tools:    tool.Defs(a.tools),
 		}
 
 		stream, err := a.streamWithRetry(ctx, req)
@@ -87,16 +108,14 @@ func (a *Agent) run(ctx context.Context) error {
 		a.messages = append(a.messages, assistantMsg)
 		a.save()
 
-		// No tool calls — done
 		if len(assistantMsg.ToolCalls) == 0 {
 			return nil
 		}
 
-		// Execute tool calls
 		for _, tc := range assistantMsg.ToolCalls {
 			result, err := a.executeTool(ctx, tc)
-			msg := Message{
-				Role:       RoleTool,
+			msg := t.Message{
+				Role:       t.RoleTool,
 				ToolCallID: tc.ID,
 				Timestamp:  time.Now(),
 			}
@@ -120,13 +139,11 @@ func (a *Agent) save() {
 	}
 }
 
-// consumeStream reads the full streaming response, printing text and accumulating tool calls.
-func (a *Agent) consumeStream(stream Stream) (Message, error) {
-	msg := Message{Role: RoleAssistant, Timestamp: time.Now()}
+func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
+	msg := t.Message{Role: t.RoleAssistant, Timestamp: time.Now()}
 	var contentBuf strings.Builder
 
-	// Track in-progress tool calls by index
-	toolCalls := map[int]*ToolCall{}
+	toolCalls := map[int]*t.ToolCall{}
 
 	for {
 		delta, err := stream.Recv()
@@ -145,7 +162,7 @@ func (a *Agent) consumeStream(stream Stream) (Message, error) {
 		for _, tcd := range delta.ToolCalls {
 			tc, exists := toolCalls[tcd.Index]
 			if !exists {
-				tc = &ToolCall{ID: tcd.ID, Name: tcd.Name}
+				tc = &t.ToolCall{ID: tcd.ID, Name: tcd.Name}
 				toolCalls[tcd.Index] = tc
 			}
 			if tcd.ID != "" {
@@ -161,7 +178,6 @@ func (a *Agent) consumeStream(stream Stream) (Message, error) {
 
 	msg.Content = contentBuf.String()
 
-	// Flatten tool calls map to slice in index order
 	if len(toolCalls) > 0 {
 		maxIdx := 0
 		for idx := range toolCalls {
@@ -179,16 +195,16 @@ func (a *Agent) consumeStream(stream Stream) (Message, error) {
 	return msg, nil
 }
 
-func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (ToolResult, error) {
-	tool := FindTool(a.tools, tc.Name)
-	if tool == nil {
-		return ToolResult{}, fmt.Errorf("unknown tool: %s", tc.Name)
+func (a *Agent) executeTool(ctx context.Context, tc t.ToolCall) (t.ToolResult, error) {
+	tl := tool.Find(a.tools, tc.Name)
+	if tl == nil {
+		return t.ToolResult{}, fmt.Errorf("unknown tool: %s", tc.Name)
 	}
 
 	var args map[string]any
 	if tc.Arguments != "" {
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-			return ToolResult{}, fmt.Errorf("invalid tool arguments: %w", err)
+			return t.ToolResult{}, fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 	if args == nil {
@@ -197,14 +213,13 @@ func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (ToolResult, error
 
 	a.ui.ToolCallStart(tc.Name, args)
 
-	// Check approval
 	if !a.shouldAutoApprove(tc.Name, args) {
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
-			return ToolResult{}, fmt.Errorf("tool call denied by user")
+			return t.ToolResult{}, fmt.Errorf("tool call denied by user")
 		}
 	}
 
-	result, err := tool.Run(ctx, args)
+	result, err := tl.Run(ctx, args)
 	a.ui.ToolCallResult(result.Content, err)
 	return result, err
 }
@@ -212,7 +227,7 @@ func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (ToolResult, error
 func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
 	tc, ok := a.config.Tools[toolName]
 	if !ok {
-		return false // unknown tool → confirm
+		return false
 	}
 
 	if tc.Approval == "auto" {
@@ -222,7 +237,6 @@ func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
 		return false
 	}
 
-	// For shell, check allow/deny patterns
 	if toolName == "shell" {
 		if cmd, ok := args["command"].(string); ok {
 			for _, pattern := range tc.Deny {
@@ -247,8 +261,7 @@ const (
 	maxRetryDelay  = 30 * time.Second
 )
 
-// streamWithRetry wraps StreamCompletion with exponential backoff on retryable errors.
-func (a *Agent) streamWithRetry(ctx context.Context, req CompletionRequest) (Stream, error) {
+func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (provider.Stream, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		stream, err := a.provider.StreamCompletion(ctx, req)
@@ -258,7 +271,6 @@ func (a *Agent) streamWithRetry(ctx context.Context, req CompletionRequest) (Str
 
 		lastErr = err
 
-		// Only retry on rate limits or server errors
 		errStr := err.Error()
 		retryable := strings.Contains(errStr, "429") ||
 			strings.Contains(errStr, "500") ||

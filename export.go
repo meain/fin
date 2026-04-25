@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 
+	t "github.com/meain/fin/internal/types"
+
 	"github.com/yuin/goldmark"
 )
 
@@ -90,8 +92,8 @@ func ExportHTML(sess *Session, w io.Writer) {
 		html.EscapeString(sess.StartedAt.Format("2006-01-02 15:04")),
 	)
 
-	// Build a map of tool call ID → ToolCall for labeling tool results
-	toolCallMap := map[string]ToolCall{}
+	// Build a map of tool call ID → t.ToolCall for labeling tool results
+	toolCallMap := map[string]t.ToolCall{}
 	for _, m := range sess.Messages {
 		for _, tc := range m.ToolCalls {
 			toolCallMap[tc.ID] = tc
@@ -100,11 +102,11 @@ func ExportHTML(sess *Session, w io.Writer) {
 
 	// For collapsing consecutive labels: track the "display role" of the previous message.
 	// Assistant and tool messages share the same display role ("fin").
-	displayRole := func(r Role) string {
+	displayRole := func(r t.Role) string {
 		switch r {
-		case RoleAssistant, RoleTool:
+		case t.RoleAssistant, t.RoleTool:
 			return "fin"
-		case RoleUser:
+		case t.RoleUser:
 			return "you"
 		default:
 			return string(r)
@@ -123,7 +125,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 		// Check if next visible message has the same display role
 		nextDisplay := ""
 		for j := i + 1; j < len(msgs); j++ {
-			if msgs[j].Role == RoleSystem {
+			if msgs[j].Role == t.RoleSystem {
 				continue
 			}
 			nextDisplay = displayRole(msgs[j].Role)
@@ -137,11 +139,11 @@ func ExportHTML(sess *Session, w io.Writer) {
 		}
 
 		switch m.Role {
-		case RoleSystem:
+		case t.RoleSystem:
 			fmt.Fprintf(w, `<div class="msg role-system"><div class="msg-role">system</div>`)
 			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", html.EscapeString(m.Content))
 
-		case RoleUser:
+		case t.RoleUser:
 			fmt.Fprintf(w, `<div class="msg role-user%s">`, gap)
 			if showLabel {
 				fmt.Fprint(w, `<div class="msg-role">you`)
@@ -152,7 +154,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 			}
 			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
 
-		case RoleAssistant:
+		case t.RoleAssistant:
 			// Always show label when switching from user to fin, even if content is empty
 			if showLabel && (m.Content != "" || len(m.ToolCalls) > 0) {
 				fmt.Fprintf(w, `<div class="msg role-assistant%s">`, gap)
@@ -177,7 +179,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 				}
 			}
 
-		case RoleTool:
+		case t.RoleTool:
 			fmt.Fprint(w, `<div class="msg role-tool">`)
 			if tc, ok := toolCallMap[m.ToolCallID]; ok {
 				if tc.Name == "edit" || tc.Name == "write" {
@@ -195,7 +197,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 			fmt.Fprint(w, "</div>\n")
 		}
 
-		if m.Role != RoleSystem {
+		if m.Role != t.RoleSystem {
 			prevDisplay = curDisplay
 		}
 	}
@@ -203,7 +205,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 	fmt.Fprint(w, "</body>\n</html>\n")
 }
 
-func renderToolCall(w io.Writer, tc ToolCall) {
+func renderToolCall(w io.Writer, tc t.ToolCall) {
 	var args map[string]any
 	if tc.Arguments != "" {
 		_ = json.Unmarshal([]byte(tc.Arguments), &args)

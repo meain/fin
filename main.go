@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+
+	"github.com/meain/fin/internal/provider"
+	t "github.com/meain/fin/internal/types"
 )
 
 func main() {
@@ -39,7 +42,6 @@ func main() {
 		return
 	}
 
-	// loadSession resolves a session from -session flag or falls back to last
 	loadSession := func() (*Session, error) {
 		if *session != "" {
 			return LoadSessionByID(*session)
@@ -60,7 +62,7 @@ func main() {
 			ExportHTML(sess, os.Stdout)
 		case "message":
 			for i := len(sess.Messages) - 1; i >= 0; i-- {
-				if sess.Messages[i].Role == RoleAssistant && sess.Messages[i].Content != "" {
+				if sess.Messages[i].Role == t.RoleAssistant && sess.Messages[i].Content != "" {
 					fmt.Println(sess.Messages[i].Content)
 					return
 				}
@@ -94,26 +96,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	provider, err := NewProvider(providerName, providerCfg)
+	p, err := provider.New(providerName, provider.Config{
+		BaseURL:   providerCfg.BaseURL,
+		APIKeyEnv: providerCfg.APIKeyEnv,
+		Headers:   providerCfg.Headers,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
 
-	// Determine output mode (flag overrides config)
 	outMode := parseOutputMode(config.Settings.UI)
 	if *uiMode != "" {
 		outMode = parseOutputMode(*uiMode)
 	}
 
-	// Discover skills
 	skills := DiscoverSkills(config)
 
 	ui := NewUI(nil, outMode)
-	agent := NewAgent(provider, config, ui, skills)
-	agent.provider = &modelInjector{provider: provider, model: modelName}
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, config, ui, skills)
 
-	// Set up session writer
 	var sw *SessionWriter
 	if *cont || *session != "" {
 		sess, err := loadSession()
@@ -127,11 +129,10 @@ func main() {
 	} else {
 		sw = NewSessionWriter(modelStr)
 	}
-	agent.OnUpdate = func(msgs []Message) {
+	agent.OnUpdate = func(msgs []t.Message) {
 		_ = sw.Save(msgs)
 	}
 
-	// Build prompt from args + piped stdin
 	args := flag.Args()
 
 	var pipedInput string
@@ -167,11 +168,11 @@ func main() {
 
 // modelInjector wraps a Provider to inject the model name into every request.
 type modelInjector struct {
-	provider Provider
+	provider provider.Provider
 	model    string
 }
 
-func (m *modelInjector) StreamCompletion(ctx context.Context, req CompletionRequest) (Stream, error) {
+func (m *modelInjector) StreamCompletion(ctx context.Context, req t.CompletionRequest) (provider.Stream, error) {
 	req.Model = m.model
 	return m.provider.StreamCompletion(ctx, req)
 }

@@ -1,4 +1,4 @@
-package main
+package tool
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	t "github.com/meain/fin/internal/types"
 )
 
 var imageExtensions = map[string]string{
@@ -18,15 +20,16 @@ var imageExtensions = map[string]string{
 	".svg":  "image/svg+xml",
 }
 
-type readTool struct{}
+// ReadTool reads files, images, or directory structures.
+type ReadTool struct{}
 
-func (t *readTool) Name() string { return "read" }
+func (rt *ReadTool) Name() string { return "read" }
 
-func (t *readTool) Description() string {
+func (rt *ReadTool) Description() string {
 	return "Read the contents of a file, an image, or list the structure of a directory. Returns file content with line numbers, image data for vision models, or a directory tree."
 }
 
-func (t *readTool) Parameters() map[string]any {
+func (rt *ReadTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -47,21 +50,21 @@ func (t *readTool) Parameters() map[string]any {
 	}
 }
 
-func (t *readTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
+func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
-		return ToolResult{}, fmt.Errorf("path is required")
+		return t.ToolResult{}, fmt.Errorf("path is required")
 	}
-	path = expandHome(path)
+	path = t.ExpandHome(path)
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
+		return t.ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
 	}
 
 	if info.IsDir() {
 		content, err := readDir(path)
-		return ToolResult{Content: content}, err
+		return t.ToolResult{Content: content}, err
 	}
 
 	// Check if it's an image
@@ -71,19 +74,19 @@ func (t *readTool) Run(_ context.Context, args map[string]any) (ToolResult, erro
 	}
 
 	content, err := readFile(path, args)
-	return ToolResult{Content: content}, err
+	return t.ToolResult{Content: content}, err
 }
 
-func readImage(path, mediaType string) (ToolResult, error) {
+func readImage(path, mediaType string) (t.ToolResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
+		return t.ToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
-	return ToolResult{
+	return t.ToolResult{
 		Content: fmt.Sprintf("[image: %s (%d bytes)]", filepath.Base(path), len(data)),
-		Images: []Image{{
+		Images: []t.Image{{
 			MediaType: mediaType,
 			Data:      encoded,
 		}},

@@ -1,4 +1,4 @@
-package main
+package tool
 
 import (
 	"bytes"
@@ -6,19 +6,22 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	t "github.com/meain/fin/internal/types"
 )
 
 const defaultShellTimeout = 120 // seconds
 
-type shellTool struct{}
+// ShellTool executes shell commands.
+type ShellTool struct{}
 
-func (t *shellTool) Name() string { return "shell" }
+func (st *ShellTool) Name() string { return "shell" }
 
-func (t *shellTool) Description() string {
+func (st *ShellTool) Description() string {
 	return "Execute a shell command via sh -c. Returns stdout and stderr separately. If you need them interleaved in order, append 2>&1 to your command."
 }
 
-func (t *shellTool) Parameters() map[string]any {
+func (st *ShellTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -35,10 +38,10 @@ func (t *shellTool) Parameters() map[string]any {
 	}
 }
 
-func (t *shellTool) Run(ctx context.Context, args map[string]any) (ToolResult, error) {
+func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult, error) {
 	command, _ := args["command"].(string)
 	if command == "" {
-		return ToolResult{}, fmt.Errorf("command is required")
+		return t.ToolResult{}, fmt.Errorf("command is required")
 	}
 
 	timeout := defaultShellTimeout
@@ -71,14 +74,14 @@ func (t *shellTool) Run(ctx context.Context, args map[string]any) (ToolResult, e
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return ToolResult{Content: result}, fmt.Errorf("command timed out after %ds", timeout)
+			return t.ToolResult{Content: result}, fmt.Errorf("command timed out after %ds", timeout)
 		}
 		exitCode := -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
-		return ToolResult{Content: fmt.Sprintf("%s\nexit code: %d", result, exitCode)}, nil
+		return t.ToolResult{Content: fmt.Sprintf("%s\nexit code: %d", result, exitCode)}, nil
 	}
 
-	return ToolResult{Content: result}, nil
+	return t.ToolResult{Content: result}, nil
 }

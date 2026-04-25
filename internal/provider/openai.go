@@ -1,4 +1,4 @@
-package main
+package provider
 
 import (
 	"bufio"
@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	t "github.com/meain/fin/internal/types"
 )
 
 type openaiProvider struct {
@@ -74,7 +76,7 @@ type oaiStreamChunk struct {
 
 // --- Conversion ---
 
-func messagesToOpenAI(msgs []Message) []oaiMessage {
+func messagesToOpenAI(msgs []t.Message) []oaiMessage {
 	out := make([]oaiMessage, 0, len(msgs))
 	for _, m := range msgs {
 		om := oaiMessage{
@@ -100,20 +102,20 @@ func messagesToOpenAI(msgs []Message) []oaiMessage {
 	return out
 }
 
-func toolDefsToOpenAI(tools []ToolDef) []oaiTool {
+func toolDefsToOpenAI(tools []t.ToolDef) []oaiTool {
 	out := make([]oaiTool, len(tools))
-	for i, t := range tools {
+	for i, td := range tools {
 		out[i] = oaiTool{Type: "function"}
-		out[i].Function.Name = t.Name
-		out[i].Function.Description = t.Description
-		out[i].Function.Parameters = t.Parameters
+		out[i].Function.Name = td.Name
+		out[i].Function.Description = td.Description
+		out[i].Function.Parameters = td.Parameters
 	}
 	return out
 }
 
 // --- StreamCompletion ---
 
-func (p *openaiProvider) StreamCompletion(ctx context.Context, req CompletionRequest) (Stream, error) {
+func (p *openaiProvider) StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error) {
 	body := oaiRequest{
 		Model:    req.Model,
 		Messages: messagesToOpenAI(req.Messages),
@@ -169,10 +171,10 @@ func (s *openaiStream) Close() {
 	}
 }
 
-func (s *openaiStream) Recv() (StreamDelta, error) {
+func (s *openaiStream) Recv() (t.StreamDelta, error) {
 	for {
 		if s.done {
-			return StreamDelta{}, io.EOF
+			return t.StreamDelta{}, io.EOF
 		}
 
 		line, err := s.reader.ReadString('\n')
@@ -180,7 +182,7 @@ func (s *openaiStream) Recv() (StreamDelta, error) {
 			if err == io.EOF {
 				s.done = true
 			}
-			return StreamDelta{}, err
+			return t.StreamDelta{}, err
 		}
 
 		line = strings.TrimSpace(line)
@@ -194,7 +196,7 @@ func (s *openaiStream) Recv() (StreamDelta, error) {
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			s.done = true
-			return StreamDelta{}, io.EOF
+			return t.StreamDelta{}, io.EOF
 		}
 
 		var chunk oaiStreamChunk
@@ -205,11 +207,11 @@ func (s *openaiStream) Recv() (StreamDelta, error) {
 			continue
 		}
 
-		delta := StreamDelta{
+		delta := t.StreamDelta{
 			Content: chunk.Choices[0].Delta.Content,
 		}
 		for _, tc := range chunk.Choices[0].Delta.ToolCalls {
-			delta.ToolCalls = append(delta.ToolCalls, ToolCallDelta{
+			delta.ToolCalls = append(delta.ToolCalls, t.ToolCallDelta{
 				ID:        tc.ID,
 				Name:      tc.Function.Name,
 				Arguments: tc.Function.Arguments,

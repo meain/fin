@@ -1,21 +1,24 @@
-package main
+package tool
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	t "github.com/meain/fin/internal/types"
 )
 
-type writeTool struct{}
+// WriteTool writes content to a file.
+type WriteTool struct{}
 
-func (t *writeTool) Name() string { return "write" }
+func (wt *WriteTool) Name() string { return "write" }
 
-func (t *writeTool) Description() string {
+func (wt *WriteTool) Description() string {
 	return "Write content to a file. Creates the file and any parent directories if they don't exist. Overwrites existing content."
 }
 
-func (t *writeTool) Parameters() map[string]any {
+func (wt *WriteTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -32,21 +35,21 @@ func (t *writeTool) Parameters() map[string]any {
 	}
 }
 
-func (t *writeTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
+func (wt *WriteTool) Run(_ context.Context, args map[string]any) (t.ToolResult, error) {
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
 	if path == "" {
-		return ToolResult{}, fmt.Errorf("path is required")
+		return t.ToolResult{}, fmt.Errorf("path is required")
 	}
-	path = expandHome(path)
+	path = t.ExpandHome(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return ToolResult{}, fmt.Errorf("failed to create directories: %w", err)
+		return t.ToolResult{}, fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return ToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
+		return t.ToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
-	return ToolResult{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
+	return t.ToolResult{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
 }
