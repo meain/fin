@@ -10,7 +10,7 @@ import (
 	t "github.com/meain/fin/internal/types"
 )
 
-const defaultShellTimeout = 120 // seconds
+const defaultShellTimeout = 7 // seconds
 
 // ShellTool executes shell commands.
 type ShellTool struct{}
