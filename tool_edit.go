@@ -47,6 +47,7 @@ func (t *editTool) Run(_ context.Context, args map[string]any) (string, error) {
 	if oldStr == "" {
 		return "", fmt.Errorf("old_string is required")
 	}
+	path = expandHome(path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {

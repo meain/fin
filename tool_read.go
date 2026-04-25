@@ -42,6 +42,7 @@ func (t *readTool) Run(_ context.Context, args map[string]any) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	path = expandHome(path)
 
 	info, err := os.Stat(path)
 	if err != nil {

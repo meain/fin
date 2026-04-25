@@ -38,6 +38,7 @@ func (t *writeTool) Run(_ context.Context, args map[string]any) (string, error) 
 	if path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	path = expandHome(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", fmt.Errorf("failed to create directories: %w", err)
