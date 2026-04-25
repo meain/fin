@@ -14,12 +14,11 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	cont := flag.Bool("continue", false, "continue last session")
 	flag.BoolVar(cont, "c", false, "continue last session (short)")
-	resume := flag.String("resume", "", "resume a specific session by UUID")
-	flag.StringVar(resume, "r", "", "resume a specific session by UUID (short)")
+	session := flag.String("session", "", "session UUID (for -continue or -export)")
+	flag.StringVar(session, "s", "", "session UUID (short)")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
-	export := flag.String("export", "", "export session as JSON (by UUID, or 'last')")
-	exportHTML := flag.String("export-html", "", "export session as HTML (by UUID, or 'last')")
+	export := flag.String("export", "", "export format: json, html, message")
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
 	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
 	flag.Parse()
@@ -39,26 +38,37 @@ func main() {
 		return
 	}
 
-	if *export != "" || *exportHTML != "" {
-		id := *export
-		if id == "" {
-			id = *exportHTML
+	// loadSession resolves a session from -session flag or falls back to last
+	loadSession := func() (*Session, error) {
+		if *session != "" {
+			return LoadSessionByID(*session)
 		}
-		var sess *Session
-		var err error
-		if id == "last" {
-			sess, err = LoadLastSession()
-		} else {
-			sess, err = LoadSessionByID(id)
-		}
+		return LoadLastSession()
+	}
+
+	if *export != "" {
+		sess, err := loadSession()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
-		if *exportHTML != "" {
-			ExportHTML(sess, os.Stdout)
-		} else {
+		switch *export {
+		case "json":
 			ExportJSON(sess, os.Stdout)
+		case "html":
+			ExportHTML(sess, os.Stdout)
+		case "message":
+			for i := len(sess.Messages) - 1; i >= 0; i-- {
+				if sess.Messages[i].Role == RoleAssistant && sess.Messages[i].Content != "" {
+					fmt.Println(sess.Messages[i].Content)
+					return
+				}
+			}
+			fmt.Fprintf(os.Stderr, "no assistant message found\n")
+			os.Exit(1)
+		default:
+			fmt.Fprintf(os.Stderr, "unknown export format: %s (use json, html, or message)\n", *export)
+			os.Exit(1)
 		}
 		return
 	}
@@ -102,15 +112,9 @@ func main() {
 	agent := NewAgent(provider, config, ui, skills)
 	agent.provider = &modelInjector{provider: provider, model: modelName}
 
-	// Resume session if requested
-	if *cont || *resume != "" {
-		var sess *Session
-		var err error
-		if *resume != "" {
-			sess, err = LoadSessionByID(*resume)
-		} else {
-			sess, err = LoadLastSession()
-		}
+	// Continue session: -continue (last), or -session <uuid> (specific)
+	if *cont || *session != "" {
+		sess, err := loadSession()
 		if err != nil {
 			ui.Error(err.Error())
 			os.Exit(1)

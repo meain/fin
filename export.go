@@ -50,10 +50,13 @@ func ExportHTML(sess *Session, w io.Writer) {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, sans-serif; background: #fff; color: #1a1a1a; max-width: 800px; margin: 0 auto; padding: 2rem 1rem; }
   .meta { color: #888; font-size: 0.85rem; margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1rem; }
-  .msg { margin-bottom: 1.5rem; }
+  .msg { padding-left: 0.75rem; border-left: 1px solid transparent; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .msg-gap { margin-top: 1rem; }
   .msg-role { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
   .msg-time { font-size: 0.7rem; color: #999; margin-left: 0.5rem; font-weight: normal; text-transform: none; letter-spacing: normal; }
   .msg-content { font-size: 0.95rem; line-height: 1.6; }
+  .role-user { border-left-color: #93c5fd; background: #eff6ff; }
+  .role-assistant, .role-tool { border-left-color: #c7d2fe; }
   .msg-content p { margin: 0.5em 0; }
   .msg-content pre { background: #f3f4f6; padding: 0.75rem; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
   .msg-content code { font-family: monospace; font-size: 0.9em; background: #f3f4f6; padding: 0.1em 0.3em; border-radius: 3px; }
@@ -61,12 +64,14 @@ func ExportHTML(sess *Session, w io.Writer) {
   .msg-content ul, .msg-content ol { padding-left: 1.5em; margin: 0.5em 0; }
   .msg-content h1, .msg-content h2, .msg-content h3 { margin: 0.75em 0 0.25em; }
   .msg-content blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; margin: 0.5em 0; }
-  .role-user .msg-role { color: #16a34a; }
-  .role-assistant .msg-role { color: #9333ea; }
-  .role-tool .msg-role { color: #ca8a04; }
+  .role-user .msg-role { color: #2563eb; }
+  .role-assistant .msg-role { color: #6366f1; }
+  .role-tool .msg-role { color: #6366f1; }
   .role-system { display: none; }
   .tool-calls { margin-top: 0.5rem; }
-  .tool-call { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.75rem; margin-top: 0.25rem; font-family: monospace; font-size: 0.85rem; }
+  .tool-call { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.75rem; margin-top: 0.25rem; font-family: monospace; font-size: 0.85rem; cursor: pointer; }
+  summary.tool-call::marker { color: #d1d5db; font-size: 0.75rem; }
+  details .tool-result, details .diff { margin-top: 0.25rem; }
   .tool-name { color: #ca8a04; font-weight: 600; }
   .tool-result { background: #f9fafb; border-left: 3px solid #e5e7eb; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
   .diff { font-family: monospace; font-size: 0.85rem; margin-top: 0.25rem; border-radius: 6px; overflow-y: auto; max-height: 300px; }
@@ -125,7 +130,11 @@ func ExportHTML(sess *Session, w io.Writer) {
 			break
 		}
 		showLabel := curDisplay != prevDisplay
-		_ = nextDisplay // used implicitly via prevDisplay on next iteration
+		_ = nextDisplay
+		gap := ""
+		if showLabel && prevDisplay != "" {
+			gap = " msg-gap"
+		}
 
 		switch m.Role {
 		case RoleSystem:
@@ -133,7 +142,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", html.EscapeString(m.Content))
 
 		case RoleUser:
-			fmt.Fprint(w, `<div class="msg role-user">`)
+			fmt.Fprintf(w, `<div class="msg role-user%s">`, gap)
 			if showLabel {
 				fmt.Fprint(w, `<div class="msg-role">you`)
 				if ts != "" {
@@ -145,7 +154,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 
 		case RoleAssistant:
 			if m.Content != "" {
-				fmt.Fprint(w, `<div class="msg role-assistant">`)
+				fmt.Fprintf(w, `<div class="msg role-assistant%s">`, gap)
 				if showLabel {
 					fmt.Fprint(w, `<div class="msg-role">fin`)
 					if ts != "" {
@@ -154,6 +163,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 					fmt.Fprint(w, `</div>`)
 				}
 				fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
+				gap = "" // subsequent tool calls in same turn don't get gap
 			}
 			for _, tc := range m.ToolCalls {
 				if tc.Name == "edit" {
@@ -171,9 +181,14 @@ func ExportHTML(sess *Session, w io.Writer) {
 					prevDisplay = curDisplay
 					continue
 				}
-				renderToolCall(w, tc)
+				summary := toolCallSummary(tc.Name, tc.Arguments)
+				fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
+					html.EscapeString(tc.Name), html.EscapeString(summary))
+				fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+			} else {
+				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
 			}
-			fmt.Fprintf(w, `<div class="tool-result">%s</div></div>`+"\n", html.EscapeString(m.Content))
+			fmt.Fprint(w, "</div>\n")
 		}
 
 		if m.Role != RoleSystem {
@@ -198,7 +213,7 @@ func renderToolCall(w io.Writer, tc ToolCall) {
 		oldStr, _ := args["old_string"].(string)
 		newStr, _ := args["new_string"].(string)
 
-		fmt.Fprintf(w, `<div class="tool-call"><span class="tool-name">edit</span> %s</div>`, html.EscapeString(path))
+		fmt.Fprintf(w, `<details open><summary class="tool-call"><span class="tool-name">edit</span> %s</summary>`, html.EscapeString(path))
 		fmt.Fprint(w, `<div class="diff">`)
 		for _, line := range strings.Split(oldStr, "\n") {
 			fmt.Fprintf(w, `<div class="diff-del">- %s</div>`, html.EscapeString(line))
@@ -206,7 +221,7 @@ func renderToolCall(w io.Writer, tc ToolCall) {
 		for _, line := range strings.Split(newStr, "\n") {
 			fmt.Fprintf(w, `<div class="diff-add">+ %s</div>`, html.EscapeString(line))
 		}
-		fmt.Fprint(w, `</div>`)
+		fmt.Fprint(w, `</div></details>`)
 		return
 	}
 

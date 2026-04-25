@@ -110,7 +110,7 @@ func LoadSessionByID(id string) (*Session, error) {
 		return nil, fmt.Errorf("session %s not found", id)
 	}
 	for i := range sessions {
-		if sessions[i].ID == id {
+		if sessions[i].ID == id || strings.HasPrefix(sessions[i].ID, id) {
 			return &sessions[i], nil
 		}
 	}
