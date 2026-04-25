@@ -43,19 +43,49 @@ func NewAgent(p provider.Provider, config *Config, ui *UI, skills []*Skill) *Age
 
 func buildTools(skills []*Skill) []tool.Tool {
 	tools := tool.BuiltinTools()
-	if len(skills) > 0 {
-		entries := make([]tool.SkillEntry, len(skills))
-		for i, s := range skills {
-			entries[i] = tool.SkillEntry{
-				Name:          s.Name,
-				Description:   s.Description,
-				Compatibility: s.Compatibility,
-				Dir:           s.Dir,
-			}
-		}
-		tools = append(tools, &tool.SkillTool{Skills: entries})
+
+	entries := loadBuiltinSkills()
+	for _, s := range skills {
+		entries = append(entries, tool.SkillEntry{
+			Name:          s.Name,
+			Description:   s.Description,
+			Compatibility: s.Compatibility,
+			Dir:           s.Dir,
+		})
 	}
+	tools = append(tools, &tool.SkillTool{Skills: entries})
+
 	return tools
+}
+
+func loadBuiltinSkills() []tool.SkillEntry {
+	var entries []tool.SkillEntry
+
+	dirs, err := builtinSkillsFS.ReadDir("skills")
+	if err != nil {
+		return entries
+	}
+
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		data, err := builtinSkillsFS.ReadFile("skills/" + d.Name() + "/SKILL.md")
+		if err != nil {
+			continue
+		}
+		skill, err := parseSkillMD(data)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, tool.SkillEntry{
+			Name:        skill.Name,
+			Description: skill.Description,
+			Body:        skill.Body,
+		})
+	}
+
+	return entries
 }
 
 // SetMessages restores messages (e.g., from a persisted session).

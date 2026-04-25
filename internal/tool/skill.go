@@ -16,6 +16,7 @@ type SkillEntry struct {
 	Description   string
 	Compatibility string
 	Dir           string
+	Body          string // if set, used instead of loading from Dir
 }
 
 // SkillTool lets the agent activate skills and read skill resources.
@@ -74,9 +75,15 @@ func (st *SkillTool) Run(_ context.Context, args map[string]any) (t.ToolResult, 
 	}
 
 	// Otherwise, activate: load the full body
-	body, err := LoadSkillBody(skill.Dir)
-	if err != nil {
-		return t.ToolResult{}, err
+	var body string
+	if skill.Body != "" {
+		body = skill.Body
+	} else {
+		var err error
+		body, err = LoadSkillBody(skill.Dir)
+		if err != nil {
+			return t.ToolResult{}, err
+		}
 	}
 
 	var result strings.Builder
