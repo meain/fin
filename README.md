@@ -20,11 +20,8 @@ go build -o fin .
 ## Usage
 
 ```bash
-# One-shot prompt
+# Run with a prompt
 ./fin "explain this code"
-
-# Interactive REPL
-./fin
 
 # Session management
 ./fin -sessions         # list all sessions
@@ -37,6 +34,20 @@ go build -o fin .
 
 # Auto-approve all tools (use with caution)
 ./fin -yolo "refactor this file"
+
+# Output modes
+./fin -ui minimal "what is in go.mod"   # compact tool display
+./fin -ui quiet "summarize this file"   # only response text on stdout
+```
+
+### Minimal mode
+
+Minimal mode shows just tool names and their key argument, followed by the response text:
+
+```
+$ fin -ui minimal "what is in go.mod? be brief"
+read go.mod
+Go 1.25.7, minimal deps: toml for config, uuid for sessions, sys/term for terminal, yaml for parsing.
 ```
 
 ## Configuration
@@ -45,28 +56,37 @@ Create `~/.config/fin/config.toml`:
 
 ```toml
 [settings]
-default_model = "anthropic/claude-3-5-sonnet-20241022"
+default_model = "anthropic/claude-sonnet-4-20250514"
+project_file = "AGENTS.md"   # per-project instructions file
+max_turns = 50                # max agent loop iterations
+yolo = false                  # auto-approve all tools
+ui = "default"                # "default", "minimal", or "quiet"
 
 [model_aliases]
-claude = "anthropic/claude-3-5-sonnet-20241022"
+sonnet = "anthropic/claude-sonnet-4-20250514"
 gpt4 = "openai/gpt-4o"
-local = "openai/llama-3.1-8b"
 
 [providers.anthropic]
-api_key = "sk-ant-..."
 base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [providers.openai]
-api_key = "sk-..."
-base_url = "https://api.openai.com/v1"
+base_url = "https://api.openai.com"
+api_key_env = "OPENAI_API_KEY"
+
+[tools.read]
+approval = "auto"
+
+[tools.write]
+approval = "confirm"
+
+[tools.edit]
+approval = "confirm"
 
 [tools.shell]
 approval = "confirm"
 allow = ["ls", "git status", "cat *"]
 deny = ["rm -rf *", "sudo *"]
-
-[tools.edit]
-approval = "auto"
 ```
 
 ## Available Tools
@@ -103,7 +123,7 @@ Conversations are saved to `~/.local/share/fin/sessions/` as JSON files with UUI
 
 Single `main` package with focused responsibilities:
 
-- `main.go` — CLI entry point and REPL
+- `main.go` — CLI entry point
 - `config.go` — TOML configuration and model aliases
 - `provider_*.go` — LLM provider implementations
 - `agent.go` — Tool execution loop
