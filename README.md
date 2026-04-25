@@ -1,14 +1,14 @@
 # fin
 
-Opinionated CLI agent harness in Go. Minimal dependencies, raw HTTP to LLM providers, streaming, TOML config.
+Opinionated CLI agent harness in Go
 
 ## Features
 
 - **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs
-- **Streaming responses**: Real-time output with Server-Sent Events
 - **Tool execution**: File operations, shell commands, and extensible skill system
 - **Session persistence**: Resume conversations across CLI invocations
-- **Zero external dependencies**: Raw HTTP, no provider SDKs
+- **Export capabilities**: JSON, HTML, and message-only export formats
+- **Flexible UI modes**: Default, minimal, and quiet output modes
 - **Configurable approval**: Auto-approve, confirm, or deny tool execution per tool type
 
 ## Installation
@@ -24,13 +24,16 @@ go install github.com/meain/fin@latest
 fin "explain this code"
 
 # Session management
-fin -sessions              # list saved sessions
+fin -sessions              # list last 10 sessions
+fin -all -sessions         # list all sessions
 fin -continue "follow up"  # continue last session
+fin -c "follow up"         # short form
 fin -s <uuid> "follow up"  # continue specific session
 
 # Export sessions
 fin -export json           # export last session as JSON
 fin -export html           # export last session as HTML
+fin -export message        # export just the last response text
 fin -s <uuid> -export html # export specific session
 
 # Model selection
@@ -49,16 +52,17 @@ fin -ui quiet "summarize this file"   # only response text on stdout
 Minimal mode shows tool names, their key argument, and the response:
 
 ```
-$ fin "what is in go.mod? be brief"
+$ fin -ui minimal "what is in go.mod? be brief"
 read go.mod
-Go 1.25.7, minimal deps: toml for config, uuid for sessions, sys/term for terminal, yaml for parsing.
+Go 1.25.7, minimal deps: BurntSushi/toml, google/uuid, yuin/goldmark, golang.org/x/term, gopkg.in/yaml.v3.
 ```
 
-Pipe the last response into other tools with `-export message`:
+Export just the last assistant response with `-export message`:
 
 ```
 $ fin -export message | pbcopy           # copy to clipboard
 $ fin -export message | glow             # render markdown in terminal
+$ fin "summarize this" && fin -export message > summary.txt
 ```
 
 Skills activate automatically when the task matches. Here fin activates the `jira` skill to look up tickets:
@@ -144,19 +148,6 @@ The system prompt is assembled from:
 
 Conversations are saved to `~/.local/share/fin/sessions/` as JSON files with UUIDs. Sessions include full message history and can be resumed at any time.
 
-## Architecture
-
-Single `main` package with focused responsibilities:
-
-- `main.go` — CLI entry point
-- `config.go` — TOML configuration and model aliases
-- `provider_*.go` — LLM provider implementations
-- `agent.go` — Tool execution loop
-- `tool_*.go` — Individual tool implementations
-- `skill.go` — Skill discovery and activation
-- `session.go` — Conversation persistence
-- `ui.go` — Terminal output and formatting
-
 ## Tool Approval Levels
 
 - `auto` — Execute without prompting
@@ -165,22 +156,6 @@ Single `main` package with focused responsibilities:
 
 Configure per tool type in `config.toml`.
 
-## Contributing
-
-This is a personal CLI tool optimized for a specific workflow. The architecture prioritizes:
-
-- Minimal dependencies
-- Raw HTTP over SDKs
-- Single package simplicity
-- Fast startup time
-
-## License
-
-MIT
-
-## Why "fin"?
-
-Two reasons:
-
-1. **Easy to type** — Three letters, easy to remember, fast to invoke
-2. **Final form** — This is the evolved, final form of my [esa agent](https://github.com/meain/esa)
+> What is with the name "fin":
+> 1. **Easy to type** — Three letters, easy to remember, fast to invoke
+> 2. **Final form** — This is the evolved, final form of my [esa agent](https://github.com/meain/esa)
