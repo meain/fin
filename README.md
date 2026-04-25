@@ -14,40 +14,65 @@ Opinionated CLI agent harness in Go. Minimal dependencies, raw HTTP to LLM provi
 ## Installation
 
 ```bash
-go build -o fin .
+go install github.com/meain/fin@latest
 ```
 
 ## Usage
 
 ```bash
 # Run with a prompt
-./fin "explain this code"
+fin "explain this code"
 
 # Session management
-./fin -sessions         # list all sessions
-./fin -continue         # resume last session
-./fin -resume <uuid>    # resume specific session
+fin -sessions              # list saved sessions
+fin -continue "follow up"  # continue last session
+fin -s <uuid> "follow up"  # continue specific session
+
+# Export sessions
+fin -export json           # export last session as JSON
+fin -export html           # export last session as HTML
+fin -s <uuid> -export html # export specific session
 
 # Model selection
-./fin -model anthropic/claude-3-sonnet "write a function"
-./fin -model openai/gpt-4o "analyze this PR"
+fin -model openai/gpt-4o "analyze this PR"
 
-# Auto-approve all tools (use with caution)
-./fin -yolo "refactor this file"
+# Auto-approve all tools
+fin -yolo "refactor this file"
 
 # Output modes
-./fin -ui minimal "what is in go.mod"   # compact tool display
-./fin -ui quiet "summarize this file"   # only response text on stdout
+fin -ui minimal "what is in go.mod"   # compact tool display
+fin -ui quiet "summarize this file"   # only response text on stdout
 ```
 
-### Minimal mode
+### Examples
 
-Minimal mode shows just tool names and their key argument, followed by the response text:
+Minimal mode shows tool names, their key argument, and the response:
 
 ```
-$ fin -ui minimal "what is in go.mod? be brief"
+$ fin "what is in go.mod? be brief"
 read go.mod
 Go 1.25.7, minimal deps: toml for config, uuid for sessions, sys/term for terminal, yaml for parsing.
+```
+
+Pipe the last response into other tools with `-export message`:
+
+```
+$ fin -export message | pbcopy           # copy to clipboard
+$ fin -export message | glow             # render markdown in terminal
+```
+
+Skills activate automatically when the task matches. Here fin activates the `jira` skill to look up tickets:
+
+```
+$ fin "what tickets are assigned to me?"
+use_skill jira
+shell $ jira issue list -a "me" --plain
+Your open tickets:
+
+- **PROJ-421** Fix auth timeout on token refresh (In Progress, High)
+- **PROJ-398** Add retry logic to webhook delivery (In Progress)
+- **PROJ-445** Update API docs for v2 endpoints (To Do)
+- **PROJ-412** Migrate config store to new schema (To Do)
 ```
 
 ## Configuration

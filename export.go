@@ -166,7 +166,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 				gap = "" // subsequent tool calls in same turn don't get gap
 			}
 			for _, tc := range m.ToolCalls {
-				if tc.Name == "edit" {
+				if tc.Name == "edit" || tc.Name == "write" {
 					fmt.Fprint(w, `<div class="msg role-tool">`)
 					renderToolCall(w, tc)
 					fmt.Fprint(w, "</div>\n")
@@ -176,7 +176,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 		case RoleTool:
 			fmt.Fprint(w, `<div class="msg role-tool">`)
 			if tc, ok := toolCallMap[m.ToolCallID]; ok {
-				if tc.Name == "edit" {
+				if tc.Name == "edit" || tc.Name == "write" {
 					fmt.Fprint(w, "</div>\n")
 					prevDisplay = curDisplay
 					continue
@@ -206,6 +206,15 @@ func renderToolCall(w io.Writer, tc ToolCall) {
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+
+	if tc.Name == "write" {
+		path, _ := args["path"].(string)
+		content, _ := args["content"].(string)
+
+		fmt.Fprintf(w, `<details open><summary class="tool-call"><span class="tool-name">write</span> %s</summary>`, html.EscapeString(path))
+		fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(content))
+		return
 	}
 
 	if tc.Name == "edit" {
