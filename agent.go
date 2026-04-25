@@ -155,6 +155,7 @@ func (a *Agent) consumeStream(stream Stream) (Message, error) {
 				tc.Name = tcd.Name
 			}
 			tc.Arguments += tcd.Arguments
+			a.ui.ToolCallProgress(tc.Name, tc.Arguments)
 		}
 	}
 

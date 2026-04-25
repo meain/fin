@@ -15,7 +15,7 @@ type shellTool struct{}
 func (t *shellTool) Name() string { return "shell" }
 
 func (t *shellTool) Description() string {
-	return "Execute a shell command and return its output. The command runs via sh -c."
+	return "Execute a shell command via sh -c. Returns stdout and stderr separately. If you need them interleaved in order, append 2>&1 to your command."
 }
 
 func (t *shellTool) Parameters() map[string]any {
@@ -62,7 +62,9 @@ func (t *shellTool) Run(ctx context.Context, args map[string]any) (ToolResult, e
 	}
 	if stderr.Len() > 0 {
 		if result != "" {
-			result += "\n"
+			result += "\nstderr:\n"
+		} else {
+			result = "stderr:\n"
 		}
 		result += stderr.String()
 	}

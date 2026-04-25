@@ -31,9 +31,10 @@ const (
 )
 
 type UI struct {
-	term      *Terminal
-	mode      OutputMode
-	wroteText bool // tracks if text was written since last newline
+	term        *Terminal
+	mode        OutputMode
+	wroteText   bool // tracks if text was written since last newline
+	hasProgress bool // tracks if a progress line is showing
 }
 
 func parseOutputMode(s string) OutputMode {
@@ -95,8 +96,31 @@ func (u *UI) EndStream() {
 	}
 }
 
+// ToolCallProgress shows live progress while tool call arguments are streaming.
+func (u *UI) ToolCallProgress(name, argsSoFar string) {
+	if u.mode == OutputQuiet {
+		return
+	}
+
+	lines := strings.Count(argsSoFar, "\\n") + strings.Count(argsSoFar, "\n")
+	if lines == 0 {
+		return
+	}
+
+	if !u.hasProgress {
+		u.ensureNewline()
+	}
+
+	fmt.Fprintf(stderr, "\033[2K\r%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
+	u.hasProgress = true
+}
+
 // ToolCallStart shows a tool being invoked.
 func (u *UI) ToolCallStart(name string, args map[string]any) {
+	if u.hasProgress {
+		fmt.Fprint(stderr, "\033[2K\r") // clear the progress line
+		u.hasProgress = false
+	}
 	u.ensureNewline()
 	if u.mode == OutputQuiet {
 		return
