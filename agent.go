@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	mathrand "math/rand/v2"
 	"path/filepath"
 	"strings"
 	"time"
@@ -67,7 +69,7 @@ func (a *Agent) run(ctx context.Context) error {
 			Tools:    ToolDefsFrom(a.tools),
 		}
 
-		stream, err := a.provider.StreamCompletion(ctx, req)
+		stream, err := a.streamWithRetry(ctx, req)
 		if err != nil {
 			a.ui.EndStream()
 			return fmt.Errorf("completion failed: %w", err)
@@ -228,4 +230,60 @@ func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
 	}
 
 	return false
+}
+
+const (
+	maxRetries     = 3
+	baseRetryDelay = 1 * time.Second
+	maxRetryDelay  = 30 * time.Second
+)
+
+// streamWithRetry wraps StreamCompletion with exponential backoff on retryable errors.
+func (a *Agent) streamWithRetry(ctx context.Context, req CompletionRequest) (Stream, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		stream, err := a.provider.StreamCompletion(ctx, req)
+		if err == nil {
+			return stream, nil
+		}
+
+		lastErr = err
+
+		// Only retry on rate limits or server errors
+		errStr := err.Error()
+		retryable := strings.Contains(errStr, "429") ||
+			strings.Contains(errStr, "500") ||
+			strings.Contains(errStr, "502") ||
+			strings.Contains(errStr, "503") ||
+			strings.Contains(errStr, "529")
+
+		if !retryable || attempt == maxRetries {
+			return nil, err
+		}
+
+		delay := retryDelay(attempt)
+		a.ui.Info(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), errStr))
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return nil, lastErr
+}
+
+func retryDelay(attempt int) time.Duration {
+	delayF := float64(baseRetryDelay) * math.Pow(2, float64(attempt))
+	if delayF > float64(maxRetryDelay) || delayF < 0 {
+		delayF = float64(maxRetryDelay)
+	}
+	delay := time.Duration(delayF)
+
+	half := int64(delay / 2)
+	if half <= 0 {
+		return delay
+	}
+	jitter := time.Duration(mathrand.Int64N(half))
+	return delay + jitter
 }
