@@ -19,6 +19,7 @@ type Agent struct {
 	config   *Config
 	ui       *UI
 	messages []Message
+	OnUpdate func([]Message) // called after each turn so the session can be saved
 }
 
 func NewAgent(provider Provider, config *Config, ui *UI, skills []*Skill) *Agent {
@@ -84,6 +85,7 @@ func (a *Agent) run(ctx context.Context) error {
 
 		a.ui.EndStream()
 		a.messages = append(a.messages, assistantMsg)
+		a.save()
 
 		// No tool calls — done
 		if len(assistantMsg.ToolCalls) == 0 {
@@ -106,9 +108,16 @@ func (a *Agent) run(ctx context.Context) error {
 			}
 			a.messages = append(a.messages, msg)
 		}
+		a.save()
 	}
 
 	return fmt.Errorf("max turns (%d) reached", maxTurns)
+}
+
+func (a *Agent) save() {
+	if a.OnUpdate != nil {
+		a.OnUpdate(a.messages)
+	}
 }
 
 // consumeStream reads the full streaming response, printing text and accumulating tool calls.

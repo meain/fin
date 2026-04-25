@@ -113,7 +113,8 @@ func main() {
 	agent := NewAgent(provider, config, ui, skills)
 	agent.provider = &modelInjector{provider: provider, model: modelName}
 
-	// Continue session: -continue (last), or -session <uuid> (specific)
+	// Set up session writer
+	var sw *SessionWriter
 	if *cont || *session != "" {
 		sess, err := loadSession()
 		if err != nil {
@@ -121,7 +122,13 @@ func main() {
 			os.Exit(1)
 		}
 		agent.SetMessages(sess.Messages)
+		sw = SessionWriterForExisting(sess)
 		ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
+	} else {
+		sw = NewSessionWriter(modelStr)
+	}
+	agent.OnUpdate = func(msgs []Message) {
+		_ = sw.Save(msgs)
 	}
 
 	// Build prompt from args + piped stdin
@@ -129,7 +136,6 @@ func main() {
 
 	var pipedInput string
 	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
-		// stdin is a pipe, not a terminal
 		data, err := io.ReadAll(os.Stdin)
 		if err == nil && len(data) > 0 {
 			pipedInput = string(data)
@@ -157,7 +163,6 @@ func main() {
 		ui.Error(err.Error())
 		os.Exit(1)
 	}
-	_ = SaveSession(modelStr, agent.Messages())
 }
 
 // modelInjector wraps a Provider to inject the model name into every request.

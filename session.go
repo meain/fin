@@ -27,21 +27,67 @@ func sessionPath() string {
 	return expandHome(sessionDir)
 }
 
-// SaveSession writes the conversation to disk.
-func SaveSession(model string, messages []Message) error {
+// SessionWriter handles incremental session saving to a stable file.
+type SessionWriter struct {
+	id       string
+	model    string
+	cwd      string
+	started  time.Time
+	filepath string
+}
+
+// NewSessionWriter creates a new session file and returns a writer for incremental saves.
+func NewSessionWriter(model string) *SessionWriter {
 	dir := sessionPath()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
+	os.MkdirAll(dir, 0755)
 
 	id := uuid.New().String()
 	cwd, _ := os.Getwd()
+	filename := fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), id)
+
+	return &SessionWriter{
+		id:       id,
+		model:    model,
+		cwd:      cwd,
+		started:  time.Now(),
+		filepath: filepath.Join(dir, filename),
+	}
+}
+
+// SessionWriterForExisting creates a writer that overwrites an existing session file.
+func SessionWriterForExisting(sess *Session) *SessionWriter {
+	dir := sessionPath()
+	// Find the existing file
+	entries, _ := os.ReadDir(dir)
+	var fp string
+	for _, e := range entries {
+		if !e.IsDir() && strings.Contains(e.Name(), sess.ID) {
+			fp = filepath.Join(dir, e.Name())
+			break
+		}
+	}
+	if fp == "" {
+		// Fallback: create a new file
+		fp = filepath.Join(dir, fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), sess.ID))
+	}
+
+	return &SessionWriter{
+		id:       sess.ID,
+		model:    sess.Model,
+		cwd:      sess.Cwd,
+		started:  sess.StartedAt,
+		filepath: fp,
+	}
+}
+
+// Save writes the current messages to disk.
+func (sw *SessionWriter) Save(messages []Message) error {
 	sess := Session{
-		ID:        id,
+		ID:        sw.id,
 		Title:     sessionTitle(messages),
-		Model:     model,
-		Cwd:       cwd,
-		StartedAt: time.Now(),
+		Model:     sw.model,
+		Cwd:       sw.cwd,
+		StartedAt: sw.started,
 		Messages:  messages,
 	}
 
@@ -50,9 +96,7 @@ func SaveSession(model string, messages []Message) error {
 		return err
 	}
 
-	filename := fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), id)
-
-	return os.WriteFile(filepath.Join(dir, filename), data, 0644)
+	return os.WriteFile(sw.filepath, data, 0644)
 }
 
 // sessionTitle generates a title from the first user message.
