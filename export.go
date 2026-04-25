@@ -153,17 +153,21 @@ func ExportHTML(sess *Session, w io.Writer) {
 			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
 
 		case RoleAssistant:
-			if m.Content != "" {
+			// Always show label when switching from user to fin, even if content is empty
+			if showLabel && (m.Content != "" || len(m.ToolCalls) > 0) {
 				fmt.Fprintf(w, `<div class="msg role-assistant%s">`, gap)
-				if showLabel {
-					fmt.Fprint(w, `<div class="msg-role">fin`)
-					if ts != "" {
-						fmt.Fprintf(w, `<span class="msg-time">%s</span>`, ts)
-					}
-					fmt.Fprint(w, `</div>`)
+				fmt.Fprint(w, `<div class="msg-role">fin`)
+				if ts != "" {
+					fmt.Fprintf(w, `<span class="msg-time">%s</span>`, ts)
 				}
+				fmt.Fprint(w, `</div>`)
+				if m.Content != "" {
+					fmt.Fprintf(w, `<div class="msg-content">%s</div>`, renderMarkdown(m.Content))
+				}
+				fmt.Fprint(w, "</div>\n")
+			} else if m.Content != "" {
+				fmt.Fprintf(w, `<div class="msg role-assistant">`)
 				fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
-				gap = "" // subsequent tool calls in same turn don't get gap
 			}
 			for _, tc := range m.ToolCalls {
 				if tc.Name == "edit" || tc.Name == "write" {
