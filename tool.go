@@ -2,12 +2,18 @@ package main
 
 import "context"
 
+// ToolResult is the return value from a tool execution.
+type ToolResult struct {
+	Content string
+	Images  []Image
+}
+
 // Tool is something the agent can invoke.
 type Tool interface {
 	Name() string
 	Description() string
 	Parameters() map[string]any // JSON Schema
-	Run(ctx context.Context, args map[string]any) (string, error)
+	Run(ctx context.Context, args map[string]any) (ToolResult, error)
 }
 
 // AllTools returns the built-in tool set, plus the skill tool if skills are available.

@@ -93,19 +93,18 @@ func (a *Agent) run(ctx context.Context) error {
 		// Execute tool calls
 		for _, tc := range assistantMsg.ToolCalls {
 			result, err := a.executeTool(ctx, tc)
-			var content string
-			if err != nil {
-				content = "Error: " + err.Error()
-			} else {
-				content = result
-			}
-
-			a.messages = append(a.messages, Message{
+			msg := Message{
 				Role:       RoleTool,
 				ToolCallID: tc.ID,
-				Content:    content,
 				Timestamp:  time.Now(),
-			})
+			}
+			if err != nil {
+				msg.Content = "Error: " + err.Error()
+			} else {
+				msg.Content = result.Content
+				msg.Images = result.Images
+			}
+			a.messages = append(a.messages, msg)
 		}
 	}
 
@@ -170,16 +169,16 @@ func (a *Agent) consumeStream(stream Stream) (Message, error) {
 	return msg, nil
 }
 
-func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (string, error) {
+func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (ToolResult, error) {
 	tool := FindTool(a.tools, tc.Name)
 	if tool == nil {
-		return "", fmt.Errorf("unknown tool: %s", tc.Name)
+		return ToolResult{}, fmt.Errorf("unknown tool: %s", tc.Name)
 	}
 
 	var args map[string]any
 	if tc.Arguments != "" {
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-			return "", fmt.Errorf("invalid tool arguments: %w", err)
+			return ToolResult{}, fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 	if args == nil {
@@ -191,12 +190,12 @@ func (a *Agent) executeTool(ctx context.Context, tc ToolCall) (string, error) {
 	// Check approval
 	if !a.shouldAutoApprove(tc.Name, args) {
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
-			return "", fmt.Errorf("tool call denied by user")
+			return ToolResult{}, fmt.Errorf("tool call denied by user")
 		}
 	}
 
 	result, err := tool.Run(ctx, args)
-	a.ui.ToolCallResult(result, err)
+	a.ui.ToolCallResult(result.Content, err)
 	return result, err
 }
 

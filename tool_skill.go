@@ -38,10 +38,10 @@ func (t *skillTool) Parameters() map[string]any {
 	}
 }
 
-func (t *skillTool) Run(_ context.Context, args map[string]any) (string, error) {
+func (t *skillTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
-		return "", fmt.Errorf("skill name is required")
+		return ToolResult{}, fmt.Errorf("skill name is required")
 	}
 
 	// Find the skill
@@ -53,22 +53,22 @@ func (t *skillTool) Run(_ context.Context, args map[string]any) (string, error) 
 		}
 	}
 	if skill == nil {
-		return "", fmt.Errorf("skill %q not found", name)
+		return ToolResult{}, fmt.Errorf("skill %q not found", name)
 	}
 
 	// If a file is requested, read it
 	if file, ok := args["file"].(string); ok && file != "" {
 		content, err := LoadSkillFile(skill, file)
 		if err != nil {
-			return "", err
+			return ToolResult{}, err
 		}
-		return content, nil
+		return ToolResult{Content: content}, nil
 	}
 
 	// Otherwise, activate: load the full body
 	body, err := LoadSkillBody(skill)
 	if err != nil {
-		return "", err
+		return ToolResult{}, err
 	}
 
 	var result strings.Builder
@@ -78,5 +78,5 @@ func (t *skillTool) Run(_ context.Context, args map[string]any) (string, error) 
 	}
 	result.WriteString(body)
 
-	return result.String(), nil
+	return ToolResult{Content: result.String()}, nil
 }

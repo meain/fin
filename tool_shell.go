@@ -35,10 +35,10 @@ func (t *shellTool) Parameters() map[string]any {
 	}
 }
 
-func (t *shellTool) Run(ctx context.Context, args map[string]any) (string, error) {
+func (t *shellTool) Run(ctx context.Context, args map[string]any) (ToolResult, error) {
 	command, _ := args["command"].(string)
 	if command == "" {
-		return "", fmt.Errorf("command is required")
+		return ToolResult{}, fmt.Errorf("command is required")
 	}
 
 	timeout := defaultShellTimeout
@@ -69,14 +69,14 @@ func (t *shellTool) Run(ctx context.Context, args map[string]any) (string, error
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return result, fmt.Errorf("command timed out after %ds", timeout)
+			return ToolResult{Content: result}, fmt.Errorf("command timed out after %ds", timeout)
 		}
 		exitCode := -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
-		return fmt.Sprintf("%s\nexit code: %d", result, exitCode), nil
+		return ToolResult{Content: fmt.Sprintf("%s\nexit code: %d", result, exitCode)}, nil
 	}
 
-	return result, nil
+	return ToolResult{Content: result}, nil
 }

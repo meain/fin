@@ -2,18 +2,28 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
+var imageExtensions = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+}
+
 type readTool struct{}
 
 func (t *readTool) Name() string { return "read" }
 
 func (t *readTool) Description() string {
-	return "Read the contents of a file or list the structure of a directory. Returns file content with line numbers, or a directory tree."
+	return "Read the contents of a file, an image, or list the structure of a directory. Returns file content with line numbers, image data for vision models, or a directory tree."
 }
 
 func (t *readTool) Parameters() map[string]any {
@@ -22,38 +32,62 @@ func (t *readTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file or directory to read",
+				"description": "Path to the file, image, or directory to read",
 			},
 			"offset": map[string]any{
 				"type":        "integer",
-				"description": "Line number to start reading from (0-based). Only for files.",
+				"description": "Line number to start reading from (0-based). Only for text files.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",
-				"description": "Maximum number of lines to read. Only for files.",
+				"description": "Maximum number of lines to read. Only for text files.",
 			},
 		},
 		"required": []string{"path"},
 	}
 }
 
-func (t *readTool) Run(_ context.Context, args map[string]any) (string, error) {
+func (t *readTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
-		return "", fmt.Errorf("path is required")
+		return ToolResult{}, fmt.Errorf("path is required")
 	}
 	path = expandHome(path)
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to stat %s: %w", path, err)
+		return ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
 	}
 
 	if info.IsDir() {
-		return readDir(path)
+		content, err := readDir(path)
+		return ToolResult{Content: content}, err
 	}
 
-	return readFile(path, args)
+	// Check if it's an image
+	ext := strings.ToLower(filepath.Ext(path))
+	if mediaType, ok := imageExtensions[ext]; ok {
+		return readImage(path, mediaType)
+	}
+
+	content, err := readFile(path, args)
+	return ToolResult{Content: content}, err
+}
+
+func readImage(path, mediaType string) (ToolResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return ToolResult{
+		Content: fmt.Sprintf("[image: %s (%d bytes)]", filepath.Base(path), len(data)),
+		Images: []Image{{
+			MediaType: mediaType,
+			Data:      encoded,
+		}},
+	}, nil
 }
 
 func readFile(path string, args map[string]any) (string, error) {
@@ -92,7 +126,7 @@ func readDir(root string) (string, error) {
 	var b strings.Builder
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries
+			return nil
 		}
 
 		rel, _ := filepath.Rel(root, path)
@@ -100,7 +134,6 @@ func readDir(root string) (string, error) {
 			return nil
 		}
 
-		// Skip hidden directories (but show hidden files at top level)
 		parts := strings.Split(rel, string(filepath.Separator))
 		for _, p := range parts {
 			if strings.HasPrefix(p, ".") {
@@ -112,7 +145,6 @@ func readDir(root string) (string, error) {
 		}
 
 		depth := len(parts) - 1
-		// Cap depth to keep output manageable
 		if depth > 3 {
 			if info.IsDir() {
 				return filepath.SkipDir

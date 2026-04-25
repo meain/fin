@@ -12,10 +12,17 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Image is a base64-encoded image attached to a message.
+type Image struct {
+	MediaType string `json:"media_type"` // e.g. "image/png"
+	Data      string `json:"data"`       // base64-encoded
+}
+
 // Message is a provider-agnostic conversation message.
 type Message struct {
 	Role       Role       `json:"role"`
 	Content    string     `json:"content,omitempty"`
+	Images     []Image    `json:"images,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Timestamp  time.Time  `json:"timestamp,omitempty"`

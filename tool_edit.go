@@ -36,37 +36,37 @@ func (t *editTool) Parameters() map[string]any {
 	}
 }
 
-func (t *editTool) Run(_ context.Context, args map[string]any) (string, error) {
+func (t *editTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_string"].(string)
 	newStr, _ := args["new_string"].(string)
 
 	if path == "" {
-		return "", fmt.Errorf("path is required")
+		return ToolResult{}, fmt.Errorf("path is required")
 	}
 	if oldStr == "" {
-		return "", fmt.Errorf("old_string is required")
+		return ToolResult{}, fmt.Errorf("old_string is required")
 	}
 	path = expandHome(path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read %s: %w", path, err)
+		return ToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	content := string(data)
 	count := strings.Count(content, oldStr)
 	if count == 0 {
-		return "", fmt.Errorf("old_string not found in %s", path)
+		return ToolResult{}, fmt.Errorf("old_string not found in %s", path)
 	}
 	if count > 1 {
-		return "", fmt.Errorf("old_string appears %d times in %s (must be unique)", count, path)
+		return ToolResult{}, fmt.Errorf("old_string appears %d times in %s (must be unique)", count, path)
 	}
 
 	newContent := strings.Replace(content, oldStr, newStr, 1)
 	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
-		return "", fmt.Errorf("failed to write %s: %w", path, err)
+		return ToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
-	return fmt.Sprintf("edited %s", path), nil
+	return ToolResult{Content: fmt.Sprintf("edited %s", path)}, nil
 }

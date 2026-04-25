@@ -56,8 +56,15 @@ type anthContentBlock struct {
 	Name      string `json:"name,omitempty"`
 	Input     any    `json:"input,omitempty"`
 	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   any    `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	Content   any              `json:"content,omitempty"`
+	IsError   bool             `json:"is_error,omitempty"`
+	Source    *anthImageSource `json:"source,omitempty"`
+}
+
+type anthImageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // e.g. "image/png"
+	Data      string `json:"data"`       // base64-encoded
 }
 
 type anthTool struct {
@@ -132,11 +139,39 @@ func messagesToAnthropic(msgs []Message) (system string, anthMsgs []anthMessage)
 			}
 
 		case RoleTool:
-			block := anthContentBlock{
-				Type:      "tool_result",
-				ToolUseID: m.ToolCallID,
-				Content:   &m.Content,
-				IsError:   strings.HasPrefix(m.Content, "Error: "),
+			var block anthContentBlock
+			if len(m.Images) > 0 {
+				// Tool result with images: use content array with image blocks
+				var contentBlocks []anthContentBlock
+				for _, img := range m.Images {
+					contentBlocks = append(contentBlocks, anthContentBlock{
+						Type: "image",
+						Source: &anthImageSource{
+							Type:      "base64",
+							MediaType: img.MediaType,
+							Data:      img.Data,
+						},
+					})
+				}
+				if m.Content != "" {
+					contentBlocks = append(contentBlocks, anthContentBlock{
+						Type: "text",
+						Text: m.Content,
+					})
+				}
+				block = anthContentBlock{
+					Type:      "tool_result",
+					ToolUseID: m.ToolCallID,
+					Content:   contentBlocks,
+					IsError:   strings.HasPrefix(m.Content, "Error: "),
+				}
+			} else {
+				block = anthContentBlock{
+					Type:      "tool_result",
+					ToolUseID: m.ToolCallID,
+					Content:   &m.Content,
+					IsError:   strings.HasPrefix(m.Content, "Error: "),
+				}
 			}
 			// Merge consecutive tool results into one user message
 			if len(anthMsgs) > 0 {

@@ -32,21 +32,21 @@ func (t *writeTool) Parameters() map[string]any {
 	}
 }
 
-func (t *writeTool) Run(_ context.Context, args map[string]any) (string, error) {
+func (t *writeTool) Run(_ context.Context, args map[string]any) (ToolResult, error) {
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
 	if path == "" {
-		return "", fmt.Errorf("path is required")
+		return ToolResult{}, fmt.Errorf("path is required")
 	}
 	path = expandHome(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", fmt.Errorf("failed to create directories: %w", err)
+		return ToolResult{}, fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return "", fmt.Errorf("failed to write %s: %w", path, err)
+		return ToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
-	return fmt.Sprintf("wrote %d bytes to %s", len(content), path), nil
+	return ToolResult{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
 }
