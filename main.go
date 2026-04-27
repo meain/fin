@@ -25,6 +25,7 @@ func main() {
 	export := flag.String("export", "", "export format: json, html, message")
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
 	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
+	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	flag.Parse()
 
 	config, err := loadConfig(*configPath)
@@ -116,6 +117,16 @@ func main() {
 	ui := NewUI(nil, outMode)
 	agent := NewAgent(&modelInjector{provider: p, model: modelName}, config, ui, skills)
 
+	args := flag.Args()
+
+	var pipedInput string
+	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
+		data, err := io.ReadAll(os.Stdin)
+		if err == nil && len(data) > 0 {
+			pipedInput = string(data)
+		}
+	}
+
 	var sw *SessionWriter
 	if *cont || *session != "" {
 		sess, err := loadSession()
@@ -126,21 +137,20 @@ func main() {
 		agent.SetMessages(sess.Messages)
 		sw = SessionWriterForExisting(sess)
 		ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
+	} else if *match && pipedInput == "" && len(args) > 0 {
+		query := strings.Join(args, " ")
+		if sess := promptSessionMatch(query); sess != nil {
+			agent.SetMessages(sess.Messages)
+			sw = SessionWriterForExisting(sess)
+			ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
+		} else {
+			sw = NewSessionWriter(modelStr)
+		}
 	} else {
 		sw = NewSessionWriter(modelStr)
 	}
 	agent.OnUpdate = func(msgs []t.Message) {
 		_ = sw.Save(msgs)
-	}
-
-	args := flag.Args()
-
-	var pipedInput string
-	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
-		data, err := io.ReadAll(os.Stdin)
-		if err == nil && len(data) > 0 {
-			pipedInput = string(data)
-		}
 	}
 
 	if len(args) == 0 && pipedInput == "" {
@@ -164,6 +174,64 @@ func main() {
 		ui.Error(err.Error())
 		os.Exit(1)
 	}
+}
+
+// promptSessionMatch searches recent sessions for matches to the query and
+// asks the user whether to continue one. Returns the chosen session or nil.
+func promptSessionMatch(query string) *Session {
+	const (
+		searchLimit = 24
+		minScore    = 1.5
+		maxShow     = 3
+	)
+
+	matches := FindMatchingSessions(query, searchLimit, minScore)
+	if len(matches) == 0 {
+		return nil
+	}
+	if len(matches) > maxShow {
+		matches = matches[:maxShow]
+	}
+
+	if len(matches) == 1 {
+		m := matches[0]
+		age := relativeTime(lastMessageTime(m.Session))
+		fmt.Fprintf(os.Stderr, "%ssimilar session:%s %s %s(%s)%s\n",
+			dim, reset, m.Session.Title, dim, age, reset)
+		fmt.Fprintf(os.Stderr, "continue? [y/N] ")
+		var input string
+		fmt.Scanln(&input)
+		if strings.ToLower(strings.TrimSpace(input)) == "y" {
+			return &matches[0].Session
+		}
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "%ssimilar sessions:%s\n", dim, reset)
+	for i, m := range matches {
+		age := relativeTime(lastMessageTime(m.Session))
+		fmt.Fprintf(os.Stderr, "  %d. %s %s(%s)%s\n",
+			i+1, m.Session.Title, dim, age, reset)
+	}
+	fmt.Fprintf(os.Stderr, "continue [1")
+	for i := range matches[1:] {
+		fmt.Fprintf(os.Stderr, "/%d", i+2)
+	}
+	fmt.Fprintf(os.Stderr, "/n]: ")
+
+	var input string
+	fmt.Scanln(&input)
+	input = strings.ToLower(strings.TrimSpace(input))
+
+	if input == "n" || input == "" {
+		return nil
+	}
+	for i := range matches {
+		if input == fmt.Sprintf("%d", i+1) {
+			return &matches[i].Session
+		}
+	}
+	return nil
 }
 
 // modelInjector wraps a Provider to inject the model name into every request.
