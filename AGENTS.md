@@ -12,6 +12,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 - `config.go` — TOML config (`~/.config/fin/config.toml`), model alias resolution, validation
 - `prompt.go` — System prompt assembly (embedded base + runtime context + skills + AGENTS.md layers)
 - `session.go` — Incremental session persistence with UUID, title, per-message timestamps
+- `matching.go` — Session auto-matching: keyword extraction, scoring (title 3x + content + recency), `FindMatchingSessions`
 - `export.go` — Export as JSON, HTML (markdown rendering, foldable tool results, edit diffs), or last message
 - `skill.go` — Skill discovery from .agents/skills/ (project + parents + global), follows symlinks, YAML frontmatter
 - `ui.go` — Terminal output: 3 modes (default/minimal/quiet), ANSI colors, live progress, line counts
@@ -51,6 +52,7 @@ fin -export json|html|message   # export session (uses -s for specific, else las
 fin -model provider/model       # override model
 fin -ui default|minimal|quiet   # output mode
 fin -yolo                       # auto-approve all tools
+fin -match "prompt"             # search recent sessions, offer to continue matching one
 ```
 
 ## Config

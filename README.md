@@ -8,6 +8,7 @@ Opinionated CLI agent harness in Go
 - **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees
 - **Agent skills**: [agentskills.io](https://agentskills.io) spec — progressive disclosure, project and global skills
 - **Session persistence**: Incremental saves, resume, export as JSON/HTML/message
+- **Session matching**: `-match` searches recent sessions by keyword relevance and offers to continue one
 - **Piped input**: `git diff | fin "review this"`
 - **Output modes**: Default (full ANSI), minimal (one-line tool summaries), quiet (stdout only)
 - **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
@@ -30,6 +31,7 @@ fin -sessions              # list last 10 sessions
 fin -all -sessions         # list all sessions
 fin -c "follow up"         # continue last session
 fin -s <uuid> "follow up"  # continue specific session (prefix match)
+fin -match "fix the auth bug"  # find relevant past session and offer to continue it
 
 # Export sessions
 fin -export json           # export last session as JSON
