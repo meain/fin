@@ -30,7 +30,7 @@ func buildSystemPrompt(config *Config, skills []*Skill) string {
 	if len(skills) > 0 {
 		b.WriteString("\n\nAvailable skills (use the use_skill tool to activate one):\n")
 		for _, s := range skills {
-			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+			fmt.Fprintf(&b, "- %s: %s (skill directory: %s)\n", s.Name, s.Description, s.Dir)
 		}
 	}
 
