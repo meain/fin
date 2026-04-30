@@ -24,12 +24,13 @@ type Image struct {
 
 // Message is a provider-agnostic conversation message.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	Images     []Image    `json:"images,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Timestamp  time.Time  `json:"timestamp,omitempty"`
+	Role        Role       `json:"role"`
+	Content     string     `json:"content,omitempty"`
+	Images      []Image    `json:"images,omitempty"`
+	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	Timestamp   time.Time  `json:"timestamp,omitempty"`
+	SubMessages []Message  `json:"sub_messages,omitempty"` // subagent conversation
 }
 
 // ToolCall represents a tool invocation requested by the model.
@@ -69,8 +70,9 @@ type ToolDef struct {
 
 // ToolResult is the return value from a tool execution.
 type ToolResult struct {
-	Content string
-	Images  []Image
+	Content     string
+	Images      []Image
+	SubMessages []Message // subagent conversation (for export)
 }
 
 // ExpandHome expands ~/... paths to the user's home directory.

@@ -210,6 +210,7 @@ func (a *Agent) run(ctx context.Context) error {
 			} else {
 				msg.Content = r.result.Content
 				msg.Images = r.result.Images
+				msg.SubMessages = r.result.SubMessages
 			}
 			a.messages = append(a.messages, msg)
 		}
@@ -394,7 +395,7 @@ func retryDelay(attempt int) time.Duration {
 
 // runSubagent spawns an isolated child agent to handle a task.
 // The child gets the same tools (minus subagent) and config, but a fresh conversation.
-func (a *Agent) runSubagent(ctx context.Context, task, model string) (string, error) {
+func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResult, error) {
 	// Build tools without SubagentTool to prevent nesting.
 	childTools := tool.BuiltinTools()
 	entries := loadBuiltinSkills()
@@ -415,7 +416,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (string, er
 		providerName, modelName := resolveModel(model, a.config)
 		providerCfg, ok := a.config.Providers[providerName]
 		if !ok {
-			return "", fmt.Errorf("unknown provider %q", providerName)
+			return t.ToolResult{}, fmt.Errorf("unknown provider %q", providerName)
 		}
 		rawProvider, err := provider.New(providerName, provider.Config{
 			BaseURL:   providerCfg.BaseURL,
@@ -423,7 +424,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (string, er
 			Headers:   providerCfg.Headers,
 		})
 		if err != nil {
-			return "", fmt.Errorf("failed to create provider for subagent: %w", err)
+			return t.ToolResult{}, fmt.Errorf("failed to create provider for subagent: %w", err)
 		}
 		p = &modelInjector{provider: rawProvider, model: modelName}
 	}
@@ -440,15 +441,18 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (string, er
 	}
 
 	if err := child.AddUserMessage(ctx, task); err != nil {
-		return "", err
+		return t.ToolResult{}, err
 	}
 
-	// Return the last assistant message.
+	// Return the last assistant message content + full conversation for export.
 	for i := len(child.messages) - 1; i >= 0; i-- {
 		if child.messages[i].Role == t.RoleAssistant && child.messages[i].Content != "" {
-			return child.messages[i].Content, nil
+			return t.ToolResult{
+				Content:     child.messages[i].Content,
+				SubMessages: child.messages,
+			}, nil
 		}
 	}
 
-	return "", fmt.Errorf("subagent produced no response")
+	return t.ToolResult{}, fmt.Errorf("subagent produced no response")
 }

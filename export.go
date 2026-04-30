@@ -69,7 +69,13 @@ func ExportHTML(sess *Session, w io.Writer) {
   .role-user .msg-role { color: #2563eb; }
   .role-assistant .msg-role { color: #6366f1; }
   .role-tool .msg-role { color: #6366f1; }
-  .role-system { display: none; }
+  .role-system { border-left-color: #d1d5db; }
+  .role-system .msg-role { color: #6b7280; }
+  .role-system .msg-content { font-size: 0.85rem; color: #6b7280; white-space: pre-wrap; font-family: monospace; max-height: 200px; overflow-y: auto; }
+  .subagent { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; }
+  .subagent-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #ca8a04; margin-bottom: 0.25rem; }
+  .subagent .msg { font-size: 0.9rem; }
+  .subagent .role-system .msg-content { max-height: 100px; }
   .tool-calls { margin-top: 0.5rem; }
   .tool-call { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.75rem; margin-top: 0.25rem; font-family: monospace; font-size: 0.85rem; cursor: pointer; }
   summary.tool-call::marker { color: #d1d5db; font-size: 0.75rem; }
@@ -108,6 +114,8 @@ func ExportHTML(sess *Session, w io.Writer) {
 			return "fin"
 		case t.RoleUser:
 			return "you"
+		case t.RoleSystem:
+			return "system"
 		default:
 			return string(r)
 		}
@@ -122,12 +130,9 @@ func ExportHTML(sess *Session, w io.Writer) {
 		}
 
 		curDisplay := displayRole(m.Role)
-		// Check if next visible message has the same display role
+		// Check if next message has the same display role
 		nextDisplay := ""
 		for j := i + 1; j < len(msgs); j++ {
-			if msgs[j].Role == t.RoleSystem {
-				continue
-			}
 			nextDisplay = displayRole(msgs[j].Role)
 			break
 		}
@@ -140,8 +145,9 @@ func ExportHTML(sess *Session, w io.Writer) {
 
 		switch m.Role {
 		case t.RoleSystem:
-			fmt.Fprintf(w, `<div class="msg role-system"><div class="msg-role">system</div>`)
-			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", html.EscapeString(m.Content))
+			fmt.Fprintf(w, `<div class="msg role-system%s">`, gap)
+			fmt.Fprintf(w, `<details><summary class="msg-role">system</summary>`)
+			fmt.Fprintf(w, `<div class="msg-content">%s</div></details></div>`+"\n", html.EscapeString(m.Content))
 
 		case t.RoleUser:
 			fmt.Fprintf(w, `<div class="msg role-user%s">`, gap)
@@ -188,18 +194,23 @@ func ExportHTML(sess *Session, w io.Writer) {
 					continue
 				}
 				summary := toolCallSummary(tc.Name, tc.Arguments)
-				fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
-					html.EscapeString(tc.Name), html.EscapeString(summary))
-				fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+				if tc.Name == "subagent" && len(m.SubMessages) > 0 {
+					fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">subagent</span> %s</summary>`,
+						html.EscapeString(summary))
+					renderSubagentConversation(w, m.SubMessages)
+					fmt.Fprint(w, `</details>`)
+				} else {
+					fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
+						html.EscapeString(tc.Name), html.EscapeString(summary))
+					fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+				}
 			} else {
 				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
 			}
 			fmt.Fprint(w, "</div>\n")
 		}
 
-		if m.Role != t.RoleSystem {
-			prevDisplay = curDisplay
-		}
+		prevDisplay = curDisplay
 	}
 
 	fmt.Fprint(w, "</body>\n</html>\n")
@@ -243,6 +254,65 @@ func renderToolCall(w io.Writer, tc t.ToolCall) {
 	summary := toolCallSummary(tc.Name, tc.Arguments)
 	fmt.Fprintf(w, `<div class="tool-call"><span class="tool-name">%s</span> %s</div>`,
 		html.EscapeString(tc.Name), html.EscapeString(summary))
+}
+
+// renderSubagentConversation renders a subagent's full message history inside a container.
+func renderSubagentConversation(w io.Writer, msgs []t.Message) {
+	// Build tool call map for this subagent's messages
+	subToolCallMap := map[string]t.ToolCall{}
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			subToolCallMap[tc.ID] = tc
+		}
+	}
+
+	fmt.Fprint(w, `<div class="subagent">`)
+	fmt.Fprint(w, `<div class="subagent-label">subagent</div>`)
+
+	for _, m := range msgs {
+		switch m.Role {
+		case t.RoleSystem:
+			fmt.Fprint(w, `<div class="msg role-system">`)
+			fmt.Fprint(w, `<details><summary class="msg-role">system</summary>`)
+			fmt.Fprintf(w, `<div class="msg-content">%s</div></details></div>`+"\n", html.EscapeString(m.Content))
+
+		case t.RoleUser:
+			fmt.Fprint(w, `<div class="msg role-user">`)
+			fmt.Fprint(w, `<div class="msg-role">task</div>`)
+			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
+
+		case t.RoleAssistant:
+			if m.Content != "" {
+				fmt.Fprint(w, `<div class="msg role-assistant">`)
+				fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
+			}
+			for _, tc := range m.ToolCalls {
+				if tc.Name == "edit" || tc.Name == "write" {
+					fmt.Fprint(w, `<div class="msg role-tool">`)
+					renderToolCall(w, tc)
+					fmt.Fprint(w, "</div>\n")
+				}
+			}
+
+		case t.RoleTool:
+			fmt.Fprint(w, `<div class="msg role-tool">`)
+			if tc, ok := subToolCallMap[m.ToolCallID]; ok {
+				if tc.Name == "edit" || tc.Name == "write" {
+					fmt.Fprint(w, "</div>\n")
+					continue
+				}
+				summary := toolCallSummary(tc.Name, tc.Arguments)
+				fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
+					html.EscapeString(tc.Name), html.EscapeString(summary))
+				fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+			} else {
+				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
+			}
+			fmt.Fprint(w, "</div>\n")
+		}
+	}
+
+	fmt.Fprint(w, `</div>`)
 }
 
 func toolCallSummary(name, argsJSON string) string {

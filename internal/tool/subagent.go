@@ -11,8 +11,8 @@ import (
 type SubagentTool struct {
 	// RunSubagent is provided by the caller (main package) to avoid circular
 	// imports. It runs a subagent with the given task and optional model
-	// override, returning the final assistant message content.
-	RunSubagent func(ctx context.Context, task, model string) (string, error)
+	// override, returning the result with the full conversation for export.
+	RunSubagent func(ctx context.Context, task, model string) (t.ToolResult, error)
 }
 
 func (s *SubagentTool) Name() string { return "subagent" }
@@ -50,10 +50,5 @@ func (s *SubagentTool) Run(ctx context.Context, args map[string]any) (t.ToolResu
 		return t.ToolResult{}, fmt.Errorf("subagent runner not configured")
 	}
 
-	result, err := s.RunSubagent(ctx, task, model)
-	if err != nil {
-		return t.ToolResult{}, err
-	}
-
-	return t.ToolResult{Content: result}, nil
+	return s.RunSubagent(ctx, task, model)
 }

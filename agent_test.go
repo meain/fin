@@ -302,11 +302,11 @@ func TestSubagentTool_IntegrationEndToEnd(t *testing.T) {
 	// We simulate this by setting up a SubagentTool with a fake RunSubagent
 	// callback (since we can't wire a real child agent without a real provider).
 	st := &tool.SubagentTool{
-		RunSubagent: func(_ context.Context, task, model string) (string, error) {
+		RunSubagent: func(_ context.Context, task, model string) (tp.ToolResult, error) {
 			if task == "" {
-				return "", io.ErrUnexpectedEOF
+				return tp.ToolResult{}, io.ErrUnexpectedEOF
 			}
-			return "subagent result for: " + task, nil
+			return tp.ToolResult{Content: "subagent result for: " + task}, nil
 		},
 	}
 
