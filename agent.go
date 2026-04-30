@@ -23,6 +23,7 @@ type Agent struct {
 	tools    []tool.Tool
 	config   *Config
 	ui       *UI
+	skills   []*Skill
 	messages []t.Message
 	OnUpdate func([]t.Message)
 }
@@ -31,15 +32,26 @@ func NewAgent(p provider.Provider, config *Config, ui *UI, skills []*Skill) *Age
 	tools := buildTools(skills)
 	systemPrompt := buildSystemPrompt(config, skills)
 
-	return &Agent{
+	a := &Agent{
 		provider: p,
 		tools:    tools,
 		config:   config,
 		ui:       ui,
+		skills:   skills,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},
 		},
 	}
+
+	// Wire up the subagent tool's runner callback.
+	for _, tl := range a.tools {
+		if st, ok := tl.(*tool.SubagentTool); ok {
+			st.RunSubagent = a.runSubagent
+			break
+		}
+	}
+
+	return a
 }
 
 func buildTools(skills []*Skill) []tool.Tool {
@@ -55,6 +67,9 @@ func buildTools(skills []*Skill) []tool.Tool {
 		})
 	}
 	tools = append(tools, &tool.SkillTool{Skills: entries})
+
+	// SubagentTool added here; RunSubagent callback is wired up in NewAgent.
+	tools = append(tools, &tool.SubagentTool{})
 
 	return tools
 }
@@ -375,4 +390,65 @@ func retryDelay(attempt int) time.Duration {
 	}
 	jitter := time.Duration(mathrand.Int64N(half))
 	return delay + jitter
+}
+
+// runSubagent spawns an isolated child agent to handle a task.
+// The child gets the same tools (minus subagent) and config, but a fresh conversation.
+func (a *Agent) runSubagent(ctx context.Context, task, model string) (string, error) {
+	// Build tools without SubagentTool to prevent nesting.
+	childTools := tool.BuiltinTools()
+	entries := loadBuiltinSkills()
+	for _, s := range a.skills {
+		entries = append(entries, tool.SkillEntry{
+			Name:          s.Name,
+			Description:   s.Description,
+			Compatibility: s.Compatibility,
+			Dir:           s.Dir,
+		})
+	}
+	childTools = append(childTools, &tool.SkillTool{Skills: entries})
+
+	systemPrompt := buildSystemPrompt(a.config, a.skills)
+
+	p := a.provider
+	if model != "" {
+		providerName, modelName := resolveModel(model, a.config)
+		providerCfg, ok := a.config.Providers[providerName]
+		if !ok {
+			return "", fmt.Errorf("unknown provider %q", providerName)
+		}
+		rawProvider, err := provider.New(providerName, provider.Config{
+			BaseURL:   providerCfg.BaseURL,
+			APIKeyEnv: providerCfg.APIKeyEnv,
+			Headers:   providerCfg.Headers,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create provider for subagent: %w", err)
+		}
+		p = &modelInjector{provider: rawProvider, model: modelName}
+	}
+
+	childUI := NewUI(nil, OutputSilent)
+	child := &Agent{
+		provider: p,
+		tools:    childTools,
+		config:   a.config,
+		ui:       childUI,
+		messages: []t.Message{
+			{Role: t.RoleSystem, Content: systemPrompt},
+		},
+	}
+
+	if err := child.AddUserMessage(ctx, task); err != nil {
+		return "", err
+	}
+
+	// Return the last assistant message.
+	for i := len(child.messages) - 1; i >= 0; i-- {
+		if child.messages[i].Role == t.RoleAssistant && child.messages[i].Content != "" {
+			return child.messages[i].Content, nil
+		}
+	}
+
+	return "", fmt.Errorf("subagent produced no response")
 }

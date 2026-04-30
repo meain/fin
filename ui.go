@@ -28,6 +28,7 @@ const (
 	OutputNormal  OutputMode = iota // full output with colors
 	OutputMinimal                   // just tool names + streamed text
 	OutputQuiet                     // only final response text (stdout)
+	OutputSilent                    // no output at all (for subagents)
 )
 
 type UI struct {
@@ -71,6 +72,9 @@ func (u *UI) AssistantLabel() {
 
 // StreamText prints a text chunk from the assistant (during streaming).
 func (u *UI) StreamText(text string) {
+	if u.mode == OutputSilent {
+		return
+	}
 	if u.mode == OutputQuiet {
 		fmt.Fprint(os.Stdout, text)
 		return
@@ -91,6 +95,9 @@ func (u *UI) ensureNewline() {
 
 // EndStream finishes the assistant's streaming output.
 func (u *UI) EndStream() {
+	if u.mode == OutputSilent {
+		return
+	}
 	u.ensureNewline()
 	if u.mode == OutputNormal {
 		u.write("\n")
@@ -99,7 +106,7 @@ func (u *UI) EndStream() {
 
 // ToolCallProgress shows live progress while tool call arguments are streaming.
 func (u *UI) ToolCallProgress(name, argsSoFar string) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.mode == OutputSilent {
 		return
 	}
 
@@ -125,6 +132,9 @@ func (u *UI) ToolCallProgress(name, argsSoFar string) {
 
 // ToolCallStart shows a tool being invoked.
 func (u *UI) ToolCallStart(name string, args map[string]any) {
+	if u.mode == OutputSilent {
+		return
+	}
 	if u.hasProgress {
 		fmt.Fprint(stderr, "\033[2K\r")
 		u.hasProgress = false
@@ -184,6 +194,14 @@ func (u *UI) ToolCallStart(name string, args map[string]any) {
 			}
 		}
 		return
+	case "subagent":
+		if task, ok := args["task"].(string); ok {
+			display := task
+			if len(display) > 60 {
+				display = display[:60] + "…"
+			}
+			u.write(fmt.Sprintf(" %s%s%s", dim, display, reset))
+		}
 	}
 	u.write("\n")
 }
@@ -211,6 +229,14 @@ func (u *UI) toolCallMinimal(name string, args map[string]any) {
 	case "use_skill":
 		skill, _ := args["name"].(string)
 		fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, skill, reset)
+	case "subagent":
+		if task, ok := args["task"].(string); ok {
+			display := task
+			if len(display) > 60 {
+				display = display[:60] + "…"
+			}
+			fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, display, reset)
+		}
 	default:
 		fmt.Fprintf(stderr, "%s%s%s", yellow, name, reset)
 	}
@@ -218,7 +244,7 @@ func (u *UI) toolCallMinimal(name string, args map[string]any) {
 
 // ToolCallDone shows a completed tool call with its name, args, and result on a compact line.
 func (u *UI) ToolCallDone(name string, args map[string]any, result string, err error) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.mode == OutputSilent {
 		return
 	}
 
@@ -275,13 +301,21 @@ func (u *UI) toolLabel(name string, args map[string]any) string {
 		if skill, ok := args["name"].(string); ok {
 			return name + reset + " " + dim + skill
 		}
+	case "subagent":
+		if task, ok := args["task"].(string); ok {
+			display := task
+			if len(display) > 60 {
+				display = display[:60] + "…"
+			}
+			return name + reset + " " + dim + display
+		}
 	}
 	return name
 }
 
 // ToolCallResult shows abbreviated tool output.
 func (u *UI) ToolCallResult(result string, err error) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.mode == OutputSilent {
 		return
 	}
 	if u.mode == OutputMinimal {

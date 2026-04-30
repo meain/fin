@@ -266,6 +266,12 @@ func toolCallSummary(name, argsJSON string) string {
 	case "use_skill":
 		s, _ := args["name"].(string)
 		return s
+	case "subagent":
+		task, _ := args["task"].(string)
+		if len(task) > 80 {
+			task = task[:80] + "…"
+		}
+		return task
 	default:
 		parts := make([]string, 0)
 		for k, v := range args {

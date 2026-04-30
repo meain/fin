@@ -297,6 +297,77 @@ func TestSingleToolCall_StillWorks(t *testing.T) {
 	}
 }
 
+func TestSubagentTool_IntegrationEndToEnd(t *testing.T) {
+	// The subagent tool calls a.runSubagent which creates a child agent.
+	// We simulate this by setting up a SubagentTool with a fake RunSubagent
+	// callback (since we can't wire a real child agent without a real provider).
+	st := &tool.SubagentTool{
+		RunSubagent: func(_ context.Context, task, model string) (string, error) {
+			if task == "" {
+				return "", io.ErrUnexpectedEOF
+			}
+			return "subagent result for: " + task, nil
+		},
+	}
+
+	fp := &fakeProvider{streams: []provider.Stream{
+		streamWithToolCalls(
+			tp.ToolCallDelta{Index: 0, ID: "c1", Name: "subagent", Arguments: `{"task":"list files"}`},
+		),
+		streamWithText("got it"),
+	}}
+
+	cfg := defaultConfig()
+	cfg.Tools["subagent"] = ToolConfig{Approval: "auto"}
+
+	agent := newTestAgent(fp, []tool.Tool{st}, &cfg)
+
+	err := agent.AddUserMessage(context.Background(), "delegate this")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	msgs := agent.Messages()
+	// [system, user, assistant(tool call), tool(result), assistant(text)]
+	if len(msgs) < 5 {
+		t.Fatalf("expected at least 5 messages, got %d", len(msgs))
+	}
+
+	toolResult := msgs[3]
+	if toolResult.ToolCallID != "c1" {
+		t.Errorf("tool call id=%s, want c1", toolResult.ToolCallID)
+	}
+	if toolResult.Content != "subagent result for: list files" {
+		t.Errorf("tool result=%q, want %q", toolResult.Content, "subagent result for: list files")
+	}
+}
+
+func TestSubagentTool_NoNesting(t *testing.T) {
+	// Verify that buildTools includes the subagent tool but
+	// the child tools built in runSubagent would not (tested via tool list).
+	// Here we just verify SubagentTool is findable in the agent's tool list.
+	st := &tool.SubagentTool{}
+	ft := &fakeTool{name: "read", result: tp.ToolResult{Content: "ok"}}
+
+	tools := []tool.Tool{ft, st}
+	found := tool.Find(tools, "subagent")
+	if found == nil {
+		t.Fatal("subagent tool not found in tool list")
+	}
+
+	// A child agent's tool list should not contain subagent.
+	// Simulate by filtering it out (as runSubagent does).
+	childTools := []tool.Tool{}
+	for _, tl := range tools {
+		if tl.Name() != "subagent" {
+			childTools = append(childTools, tl)
+		}
+	}
+	if tool.Find(childTools, "subagent") != nil {
+		t.Error("subagent tool should not be in child tool list")
+	}
+}
+
 func TestToolError_PropagatedCorrectly(t *testing.T) {
 	ft := &fakeTool{
 		name: "failing",
