@@ -216,6 +216,69 @@ func (u *UI) toolCallMinimal(name string, args map[string]any) {
 	}
 }
 
+// ToolCallDone shows a completed tool call with its name, args, and result on a compact line.
+func (u *UI) ToolCallDone(name string, args map[string]any, result string, err error) {
+	if u.mode == OutputQuiet {
+		return
+	}
+
+	label := u.toolLabel(name, args)
+	lines := strings.Count(result, "\n")
+
+	if u.mode == OutputMinimal {
+		if err != nil {
+			fmt.Fprintf(stderr, "%s%s %serror: %s%s\n", yellow, label, red, err, reset)
+		} else if lines > 0 {
+			fmt.Fprintf(stderr, "%s%s %s(%d lines)%s\n", yellow, label, dim, lines, reset)
+		} else {
+			fmt.Fprintf(stderr, "%s%s%s\n", yellow, label, reset)
+		}
+		return
+	}
+
+	u.write(fmt.Sprintf("  %s%s%s%s", bold, yellow, label, reset))
+	if err != nil {
+		u.write(fmt.Sprintf(" %s%serror: %s%s\n", dim, red, err, reset))
+		return
+	}
+	if lines > 0 {
+		u.write(fmt.Sprintf(" %s(%d lines)%s\n", dim, lines, reset))
+	} else {
+		u.write("\n")
+	}
+}
+
+// toolLabel returns a short description like "read agent.go" or "shell $ ls".
+func (u *UI) toolLabel(name string, args map[string]any) string {
+	switch name {
+	case "shell":
+		if cmd, ok := args["command"].(string); ok {
+			return name + reset + " " + dim + "$ " + cmd
+		}
+	case "read":
+		if path, ok := args["path"].(string); ok {
+			return name + reset + " " + dim + path
+		}
+	case "write":
+		if path, ok := args["path"].(string); ok {
+			return name + reset + " " + dim + path
+		}
+	case "edit":
+		if path, ok := args["path"].(string); ok {
+			old, _ := args["old_string"].(string)
+			nw, _ := args["new_string"].(string)
+			oldLines := strings.Count(old, "\n") + 1
+			newLines := strings.Count(nw, "\n") + 1
+			return fmt.Sprintf("%s%s %s%s (-%d +%d)", name, reset, dim, path, oldLines, newLines)
+		}
+	case "use_skill":
+		if skill, ok := args["name"].(string); ok {
+			return name + reset + " " + dim + skill
+		}
+	}
+	return name
+}
+
 // ToolCallResult shows abbreviated tool output.
 func (u *UI) ToolCallResult(result string, err error) {
 	if u.mode == OutputQuiet {

@@ -9,6 +9,7 @@ import (
 	mathrand "math/rand/v2"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meain/fin/internal/provider"
@@ -142,18 +143,58 @@ func (a *Agent) run(ctx context.Context) error {
 			return nil
 		}
 
-		for _, tc := range assistantMsg.ToolCalls {
-			result, err := a.executeTool(ctx, tc)
+		// Phase 1: approve all tools sequentially (interactive)
+		type approvedTool struct {
+			tc   t.ToolCall
+			tool tool.Tool
+			args map[string]any
+			err  error
+		}
+		items := make([]approvedTool, len(assistantMsg.ToolCalls))
+		for i, tc := range assistantMsg.ToolCalls {
+			tl, args, err := a.approveTool(tc)
+			items[i] = approvedTool{tc: tc, tool: tl, args: args, err: err}
+		}
+
+		// Phase 2: execute approved tools in parallel
+		type toolExecResult struct {
+			result t.ToolResult
+			err    error
+		}
+		results := make([]toolExecResult, len(items))
+		var wg sync.WaitGroup
+		for i, item := range items {
+			if item.err != nil {
+				results[i] = toolExecResult{err: item.err}
+				continue
+			}
+			wg.Add(1)
+			go func(i int, tl tool.Tool, args map[string]any) {
+				defer wg.Done()
+				res, err := tl.Run(ctx, args)
+				results[i] = toolExecResult{result: res, err: err}
+			}(i, item.tool, item.args)
+		}
+		wg.Wait()
+
+		// Phase 3: display results and build messages
+		for i, item := range items {
+			r := results[i]
+			if item.err == nil {
+				a.ui.ToolCallDone(item.tc.Name, item.args, r.result.Content, r.err)
+			}
 			msg := t.Message{
 				Role:       t.RoleTool,
-				ToolCallID: tc.ID,
+				ToolCallID: item.tc.ID,
 				Timestamp:  time.Now(),
 			}
-			if err != nil {
-				msg.Content = "Error: " + err.Error()
+			if item.err != nil {
+				msg.Content = "Error: " + item.err.Error()
+			} else if r.err != nil {
+				msg.Content = "Error: " + r.err.Error()
 			} else {
-				msg.Content = result.Content
-				msg.Images = result.Images
+				msg.Content = r.result.Content
+				msg.Images = r.result.Images
 			}
 			a.messages = append(a.messages, msg)
 		}
@@ -225,33 +266,30 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 	return msg, nil
 }
 
-func (a *Agent) executeTool(ctx context.Context, tc t.ToolCall) (t.ToolResult, error) {
+func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 	tl := tool.Find(a.tools, tc.Name)
 	if tl == nil {
-		return t.ToolResult{}, fmt.Errorf("unknown tool: %s", tc.Name)
+		return nil, nil, fmt.Errorf("unknown tool: %s", tc.Name)
 	}
 
 	var args map[string]any
 	if tc.Arguments != "" {
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-			return t.ToolResult{}, fmt.Errorf("invalid tool arguments: %w", err)
+			return nil, nil, fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 	if args == nil {
 		args = map[string]any{}
 	}
 
-	a.ui.ToolCallStart(tc.Name, args)
-
 	if !a.shouldAutoApprove(tc.Name, args) {
+		a.ui.ToolCallStart(tc.Name, args)
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
-			return t.ToolResult{}, fmt.Errorf("tool call denied by user")
+			return nil, nil, fmt.Errorf("tool call denied by user")
 		}
 	}
 
-	result, err := tl.Run(ctx, args)
-	a.ui.ToolCallResult(result.Content, err)
-	return result, err
+	return tl, args, nil
 }
 
 func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
