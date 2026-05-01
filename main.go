@@ -175,6 +175,17 @@ func main() {
 		ui.Error(err.Error())
 		os.Exit(1)
 	}
+
+	if outMode == OutputNormal {
+		u := agent.Usage
+		if u.InputTokens > 0 || u.OutputTokens > 0 {
+			usage := fmt.Sprintf("tokens: %d in, %d out", u.InputTokens, u.OutputTokens)
+			if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
+				usage += fmt.Sprintf(" (cache: %d read, %d write)", u.CacheReadInputTokens, u.CacheCreationInputTokens)
+			}
+			fmt.Fprintf(os.Stderr, "%s%s%s\n", dim, usage, reset)
+		}
+	}
 }
 
 // promptSessionMatch searches recent sessions for matches to the query and

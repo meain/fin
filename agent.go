@@ -25,6 +25,7 @@ type Agent struct {
 	ui       *UI
 	skills   []*Skill
 	messages []t.Message
+	Usage    t.Usage // accumulated token usage across all turns
 	OnUpdate func([]t.Message)
 }
 
@@ -246,6 +247,13 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 				break
 			}
 			return msg, err
+		}
+
+		if delta.Usage != nil {
+			a.Usage.InputTokens += delta.Usage.InputTokens
+			a.Usage.OutputTokens += delta.Usage.OutputTokens
+			a.Usage.CacheCreationInputTokens += delta.Usage.CacheCreationInputTokens
+			a.Usage.CacheReadInputTokens += delta.Usage.CacheReadInputTokens
 		}
 
 		if delta.Content != "" {

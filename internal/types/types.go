@@ -48,10 +48,19 @@ type ToolCallDelta struct {
 	Arguments string // partial JSON fragment
 }
 
+// Usage tracks token consumption for a single response.
+type Usage struct {
+	InputTokens              int
+	OutputTokens             int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+}
+
 // StreamDelta is a single chunk from a streaming response.
 type StreamDelta struct {
 	Content   string
 	ToolCalls []ToolCallDelta
+	Usage     *Usage // non-nil when usage data is available
 }
 
 // CompletionRequest is the provider-agnostic request for a chat completion.

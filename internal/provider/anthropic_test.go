@@ -15,8 +15,8 @@ func TestMessagesToAnthropic_UserMessage(t *testing.T) {
 		{Role: tp.RoleUser, Content: "hello"},
 	}
 	system, anthMsgs := messagesToAnthropic(msgs)
-	if system != "" {
-		t.Fatalf("expected empty system, got %q", system)
+	if len(system) != 0 {
+		t.Fatalf("expected empty system, got %v", system)
 	}
 	if len(anthMsgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(anthMsgs))
@@ -35,8 +35,8 @@ func TestMessagesToAnthropic_SystemMessage(t *testing.T) {
 		{Role: tp.RoleUser, Content: "hi"},
 	}
 	system, anthMsgs := messagesToAnthropic(msgs)
-	if system != "you are helpful" {
-		t.Fatalf("expected system 'you are helpful', got %q", system)
+	if len(system) != 1 || system[0].Text != "you are helpful" {
+		t.Fatalf("expected system 'you are helpful', got %v", system)
 	}
 	if len(anthMsgs) != 1 {
 		t.Fatalf("expected 1 message (system extracted), got %d", len(anthMsgs))
@@ -241,8 +241,8 @@ func TestMessagesToAnthropic_FullConversation(t *testing.T) {
 		{Role: tp.RoleAssistant, Content: "I found foo for you"},
 	}
 	system, anthMsgs := messagesToAnthropic(msgs)
-	if system != "be concise" {
-		t.Fatalf("expected system 'be concise', got %q", system)
+	if len(system) != 1 || system[0].Text != "be concise" {
+		t.Fatalf("expected system 'be concise', got %v", system)
 	}
 	if len(anthMsgs) != 4 {
 		t.Fatalf("expected 4 messages, got %d", len(anthMsgs))
@@ -458,8 +458,13 @@ func TestAnthropicRequestJSON(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	if decoded["system"] != "be helpful" {
-		t.Fatalf("expected system 'be helpful', got %v", decoded["system"])
+	sysArr, ok := decoded["system"].([]any)
+	if !ok || len(sysArr) != 1 {
+		t.Fatalf("expected system array with 1 block, got %v", decoded["system"])
+	}
+	sysBlock, ok := sysArr[0].(map[string]any)
+	if !ok || sysBlock["text"] != "be helpful" {
+		t.Fatalf("expected system text 'be helpful', got %v", sysArr[0])
 	}
 	if decoded["model"] != "claude-3-opus-20240229" {
 		t.Fatalf("expected model, got %v", decoded["model"])
@@ -467,5 +472,68 @@ func TestAnthropicRequestJSON(t *testing.T) {
 	messages, ok := decoded["messages"].([]any)
 	if !ok || len(messages) != 1 {
 		t.Fatalf("expected 1 message in JSON, got %v", decoded["messages"])
+	}
+}
+
+func TestPromptCaching_ToolsGetCacheControl(t *testing.T) {
+	system := []anthSystemBlock{
+		{Type: "text", Text: "be helpful"},
+	}
+	tools := []anthTool{
+		{Name: "read", Description: "Read a file", InputSchema: map[string]any{"type": "object"}},
+		{Name: "write", Description: "Write a file", InputSchema: map[string]any{"type": "object"}},
+	}
+
+	// Simulate what StreamCompletion does
+	ephemeral := &anthCacheControl{Type: "ephemeral"}
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = ephemeral
+	} else if len(system) > 0 {
+		system[len(system)-1].CacheControl = ephemeral
+	}
+
+	// Last tool should have cache_control
+	if tools[1].CacheControl == nil || tools[1].CacheControl.Type != "ephemeral" {
+		t.Fatal("expected cache_control on last tool")
+	}
+	// First tool should not
+	if tools[0].CacheControl != nil {
+		t.Fatal("expected no cache_control on first tool")
+	}
+	// System should not (tools take priority)
+	if system[0].CacheControl != nil {
+		t.Fatal("expected no cache_control on system when tools present")
+	}
+
+	// Verify JSON serialization
+	data, err := json.Marshal(tools[1])
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	cc, ok := decoded["cache_control"].(map[string]any)
+	if !ok || cc["type"] != "ephemeral" {
+		t.Fatalf("expected cache_control.type 'ephemeral' in JSON, got %v", decoded["cache_control"])
+	}
+}
+
+func TestPromptCaching_SystemGetsCacheControlWhenNoTools(t *testing.T) {
+	system := []anthSystemBlock{
+		{Type: "text", Text: "be helpful"},
+	}
+	var tools []anthTool
+
+	ephemeral := &anthCacheControl{Type: "ephemeral"}
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = ephemeral
+	} else if len(system) > 0 {
+		system[len(system)-1].CacheControl = ephemeral
+	}
+
+	if system[0].CacheControl == nil || system[0].CacheControl.Type != "ephemeral" {
+		t.Fatal("expected cache_control on system block when no tools")
 	}
 }

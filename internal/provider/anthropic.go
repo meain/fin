@@ -38,12 +38,22 @@ func newAnthropicProvider(apiKey, baseURL string, httpClient *http.Client) Provi
 // --- Anthropic wire types ---
 
 type anthRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	System    string        `json:"system,omitempty"`
-	Messages  []anthMessage `json:"messages"`
-	Tools     []anthTool    `json:"tools,omitempty"`
-	Stream    bool          `json:"stream"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	System    []anthSystemBlock `json:"system,omitempty"`
+	Messages  []anthMessage    `json:"messages"`
+	Tools     []anthTool       `json:"tools,omitempty"`
+	Stream    bool             `json:"stream"`
+}
+
+type anthCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+type anthSystemBlock struct {
+	Type         string            `json:"type"`
+	Text         string            `json:"text"`
+	CacheControl *anthCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthMessage struct {
@@ -70,9 +80,10 @@ type anthImageSource struct {
 }
 
 type anthTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description,omitempty"`
+	InputSchema  any               `json:"input_schema"`
+	CacheControl *anthCacheControl `json:"cache_control,omitempty"`
 }
 
 // SSE event types
@@ -96,6 +107,23 @@ type anthContentBlockDelta struct {
 	} `json:"delta"`
 }
 
+type anthMessageStart struct {
+	Message struct {
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+}
+
+type anthMessageDelta struct {
+	Usage struct {
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+}
+
 type anthErrorEvent struct {
 	Error struct {
 		Type    string `json:"type"`
@@ -105,11 +133,14 @@ type anthErrorEvent struct {
 
 // --- Conversion: Message -> anthMessage ---
 
-func messagesToAnthropic(msgs []t.Message) (system string, anthMsgs []anthMessage) {
+func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs []anthMessage) {
 	for _, m := range msgs {
 		switch m.Role {
 		case t.RoleSystem:
-			system = m.Content
+			system = append(system, anthSystemBlock{
+				Type: "text",
+				Text: m.Content,
+			})
 
 		case t.RoleUser:
 			anthMsgs = append(anthMsgs, anthMessage{Role: "user", Content: m.Content})
@@ -211,6 +242,14 @@ func toolDefsToAnthropic(tools []t.ToolDef) []anthTool {
 func (p *anthropicProvider) StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error) {
 	system, anthMsgs := messagesToAnthropic(req.Messages)
 	anthTools := toolDefsToAnthropic(req.Tools)
+
+	// Mark the last system block and last tool for prompt caching
+	ephemeral := &anthCacheControl{Type: "ephemeral"}
+	if len(anthTools) > 0 {
+		anthTools[len(anthTools)-1].CacheControl = ephemeral
+	} else if len(system) > 0 {
+		system[len(system)-1].CacheControl = ephemeral
+	}
 
 	body := anthRequest{
 		Model:     req.Model,
@@ -314,6 +353,31 @@ func (s *anthropicStream) Recv() (t.StreamDelta, error) {
 						Index:     ev.Index,
 						Arguments: ev.Delta.PartialJSON,
 					}},
+				}, nil
+			}
+
+		case "message_start":
+			var ev anthMessageStart
+			if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				continue
+			}
+			u := ev.Message.Usage
+			return t.StreamDelta{
+				Usage: &t.Usage{
+					InputTokens:              u.InputTokens,
+					CacheCreationInputTokens: u.CacheCreationInputTokens,
+					CacheReadInputTokens:     u.CacheReadInputTokens,
+				},
+			}, nil
+
+		case "message_delta":
+			var ev anthMessageDelta
+			if err := json.Unmarshal([]byte(data), &ev); err != nil {
+				continue
+			}
+			if ev.Usage.OutputTokens > 0 {
+				return t.StreamDelta{
+					Usage: &t.Usage{OutputTokens: ev.Usage.OutputTokens},
 				}, nil
 			}
 
