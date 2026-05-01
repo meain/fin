@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"path/filepath"
 	"strings"
 
 	t "github.com/meain/fin/internal/types"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
-var md = goldmark.New()
+var md = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+)
 
 // renderMarkdown converts markdown to HTML.
 func renderMarkdown(src string) string {
@@ -66,6 +70,11 @@ func ExportHTML(sess *Session, w io.Writer) {
   .msg-content ul, .msg-content ol { padding-left: 1.5em; margin: 0.5em 0; }
   .msg-content h1, .msg-content h2, .msg-content h3 { margin: 0.75em 0 0.25em; }
   .msg-content blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; margin: 0.5em 0; }
+  .msg-content table { border-collapse: collapse; margin: 0.5em 0; width: auto; }
+  .msg-content th, .msg-content td { border: 1px solid #d1d5db; padding: 0.35rem 0.75rem; text-align: left; }
+  .msg-content th { background: #f3f4f6; font-weight: 600; }
+  .msg-content ul.contains-task-list { list-style: none; padding-left: 0.5em; }
+  .msg-content li > input[type="checkbox"] { margin-right: 0.4em; }
   .role-user .msg-role { color: #2563eb; }
   .role-assistant .msg-role { color: #6366f1; }
   .role-tool .msg-role { color: #6366f1; }
@@ -82,16 +91,22 @@ func ExportHTML(sess *Session, w io.Writer) {
   details .tool-result, details .diff { margin-top: 0.25rem; }
   .tool-name { color: #ca8a04; font-weight: 600; }
   .tool-result { background: #f9fafb; border-left: 3px solid #e5e7eb; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+  .tool-result pre { background: none; margin: 0; padding: 0; border-radius: 0; }
+  .tool-result pre code { background: none; padding: 0; font-size: inherit; }
   .diff { font-family: monospace; font-size: 0.85rem; margin-top: 0.25rem; border-radius: 6px; overflow-y: auto; max-height: 300px; }
-  .diff-del { background: #fef2f2; color: #991b1b; padding: 0 0.5rem; }
-  .diff-add { background: #f0fdf4; color: #166534; padding: 0 0.5rem; }
+  .diff pre { background: none; margin: 0; padding: 0; border-radius: 0; }
+  .diff pre code { background: none; padding: 0; font-size: inherit; }
 </style>
-</head>
+`,
+		html.EscapeString(title),
+	)
+	fmt.Fprintf(w, "<style>%s</style>\n", hljsCSS)
+	fmt.Fprintf(w, "<script>%s</script>\n", hljsJS)
+	fmt.Fprintf(w, `</head>
 <body>
 <h1>%s</h1>
 <div class="meta">%s &middot; %s &middot; %s</div>
 `,
-		html.EscapeString(title),
 		html.EscapeString(title),
 		html.EscapeString(sess.ID),
 		html.EscapeString(sess.Model),
@@ -200,9 +215,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 					renderSubagentConversation(w, m.SubMessages)
 					fmt.Fprint(w, `</details>`)
 				} else {
-					fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
-						html.EscapeString(tc.Name), html.EscapeString(summary))
-					fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+					renderToolResult(w, tc, summary, m.Content)
 				}
 			} else {
 				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
@@ -213,7 +226,7 @@ func ExportHTML(sess *Session, w io.Writer) {
 		prevDisplay = curDisplay
 	}
 
-	fmt.Fprint(w, "</body>\n</html>\n")
+	fmt.Fprint(w, "<script>hljs.highlightAll();</script>\n</body>\n</html>\n")
 }
 
 func renderToolCall(w io.Writer, tc t.ToolCall) {
@@ -230,7 +243,9 @@ func renderToolCall(w io.Writer, tc t.ToolCall) {
 		content, _ := args["content"].(string)
 
 		fmt.Fprintf(w, `<details open><summary class="tool-call"><span class="tool-name">write</span> %s</summary>`, html.EscapeString(path))
-		fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(content))
+		fmt.Fprint(w, `<div class="tool-result">`)
+		renderCodeBlock(w, content, langFromPath(path))
+		fmt.Fprint(w, `</div></details>`)
 		return
 	}
 
@@ -239,14 +254,21 @@ func renderToolCall(w io.Writer, tc t.ToolCall) {
 		oldStr, _ := args["old_string"].(string)
 		newStr, _ := args["new_string"].(string)
 
-		fmt.Fprintf(w, `<details open><summary class="tool-call"><span class="tool-name">edit</span> %s</summary>`, html.EscapeString(path))
-		fmt.Fprint(w, `<div class="diff">`)
+		var diff strings.Builder
 		for _, line := range strings.Split(oldStr, "\n") {
-			fmt.Fprintf(w, `<div class="diff-del">- %s</div>`, html.EscapeString(line))
+			diff.WriteString("- ")
+			diff.WriteString(line)
+			diff.WriteByte('\n')
 		}
 		for _, line := range strings.Split(newStr, "\n") {
-			fmt.Fprintf(w, `<div class="diff-add">+ %s</div>`, html.EscapeString(line))
+			diff.WriteString("+ ")
+			diff.WriteString(line)
+			diff.WriteByte('\n')
 		}
+
+		fmt.Fprintf(w, `<details open><summary class="tool-call"><span class="tool-name">edit</span> %s</summary>`, html.EscapeString(path))
+		fmt.Fprint(w, `<div class="diff">`)
+		renderCodeBlock(w, diff.String(), "diff")
 		fmt.Fprint(w, `</div></details>`)
 		return
 	}
@@ -302,9 +324,7 @@ func renderSubagentConversation(w io.Writer, msgs []t.Message) {
 					continue
 				}
 				summary := toolCallSummary(tc.Name, tc.Arguments)
-				fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
-					html.EscapeString(tc.Name), html.EscapeString(summary))
-				fmt.Fprintf(w, `<div class="tool-result">%s</div></details>`, html.EscapeString(m.Content))
+				renderToolResult(w, tc, summary, m.Content)
 			} else {
 				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
 			}
@@ -348,5 +368,69 @@ func toolCallSummary(name, argsJSON string) string {
 			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
 		}
 		return strings.Join(parts, " ")
+	}
+}
+
+// renderToolResult renders a tool result as a collapsible block, with syntax highlighting for read tools.
+func renderToolResult(w io.Writer, tc t.ToolCall, summary, content string) {
+	fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">%s</span> %s</summary>`,
+		html.EscapeString(tc.Name), html.EscapeString(summary))
+	if tc.Name == "read" {
+		if lang := langFromPath(summary); lang != "" {
+			fmt.Fprint(w, `<div class="tool-result">`)
+			renderCodeBlock(w, content, lang)
+			fmt.Fprint(w, `</div>`)
+		} else {
+			fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(content))
+		}
+	} else {
+		fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(content))
+	}
+	fmt.Fprint(w, `</details>`)
+}
+
+// langFromPath returns a highlight.js language hint from a file extension, or empty string.
+func langFromPath(path string) string {
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	switch ext {
+	case "go", "py", "js", "ts", "rs", "rb", "java", "c", "cpp", "css", "sql", "lua", "r",
+		"swift", "kotlin", "scala", "dart", "perl", "php", "zig", "nim", "haskell", "elixir",
+		"clojure", "graphql", "proto":
+		return ext
+	case "jsx":
+		return "javascript"
+	case "tsx":
+		return "typescript"
+	case "yml":
+		return "yaml"
+	case "md":
+		return "markdown"
+	case "sh", "bash", "zsh":
+		return "bash"
+	case "toml":
+		return "ini"
+	case "tf", "hcl":
+		return "hcl"
+	case "html", "htm":
+		return "html"
+	case "xml", "svg":
+		return "xml"
+	case "json":
+		return "json"
+	case "yaml":
+		return "yaml"
+	case "dockerfile":
+		return "dockerfile"
+	default:
+		return ""
+	}
+}
+
+// renderCodeBlock writes content as a highlighted code block with optional language hint.
+func renderCodeBlock(w io.Writer, content, lang string) {
+	if lang != "" {
+		fmt.Fprintf(w, `<pre><code class="language-%s">%s</code></pre>`, lang, html.EscapeString(content))
+	} else {
+		fmt.Fprintf(w, `<pre><code>%s</code></pre>`, html.EscapeString(content))
 	}
 }

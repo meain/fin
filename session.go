@@ -210,7 +210,7 @@ func ListSessions(limit int) {
 		age := relativeTime(lastMessageTime(sess))
 		short := sess.ID[:8]
 
-		fmt.Fprintf(os.Stderr, "%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
+		fmt.Printf("%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
 	}
 
 	if limit > 0 && total > limit {
