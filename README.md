@@ -2,6 +2,8 @@
 
 Opinionated CLI agent harness in Go
 
+![demo](demo.gif)
+
 ## Features
 
 - **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs via raw HTTP
