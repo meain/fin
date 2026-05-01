@@ -20,6 +20,8 @@ func main() {
 	flag.BoolVar(cont, "c", false, "continue last session (short)")
 	session := flag.String("session", "", "session UUID (for -continue or -export)")
 	flag.StringVar(session, "s", "", "session UUID (short)")
+	name := flag.String("name", "", "named session (resumes if exists, creates if not)")
+	flag.StringVar(name, "n", "", "named session (short)")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
 	export := flag.String("export", "", "export format: json, html, message")
@@ -44,6 +46,9 @@ func main() {
 	}
 
 	loadSession := func() (*Session, error) {
+		if *name != "" {
+			return LoadSessionByName(*name)
+		}
 		if *session != "" {
 			return LoadSessionByID(*session)
 		}
@@ -129,7 +134,17 @@ func main() {
 	}
 
 	var sw *SessionWriter
-	if *cont || *session != "" {
+	if *name != "" {
+		sess, err := LoadSessionByName(*name)
+		if err == nil {
+			agent.SetMessages(sess.Messages)
+			sw = SessionWriterForExisting(sess)
+			ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.Name, sess.StartedAt.Format("2006-01-02 15:04")))
+		} else {
+			sw = NewSessionWriter(modelStr, *name)
+			ui.Info(fmt.Sprintf("new session [%s]", *name))
+		}
+	} else if *cont || *session != "" {
 		sess, err := loadSession()
 		if err != nil {
 			ui.Error(err.Error())
@@ -145,10 +160,10 @@ func main() {
 			sw = SessionWriterForExisting(sess)
 			ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
 		} else {
-			sw = NewSessionWriter(modelStr)
+			sw = NewSessionWriter(modelStr, "")
 		}
 	} else {
-		sw = NewSessionWriter(modelStr)
+		sw = NewSessionWriter(modelStr, "")
 	}
 	agent.OnUpdate = func(msgs []t.Message) {
 		_ = sw.Save(msgs)

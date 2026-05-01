@@ -16,11 +16,12 @@ import (
 const sessionDir = "~/.local/share/fin/sessions"
 
 type Session struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Model     string    `json:"model"`
-	Cwd       string    `json:"cwd"`
-	StartedAt time.Time `json:"started_at"`
+	ID        string      `json:"id"`
+	Title     string      `json:"title"`
+	Model     string      `json:"model"`
+	Cwd       string      `json:"cwd"`
+	Name      string      `json:"name,omitempty"`
+	StartedAt time.Time   `json:"started_at"`
 	Messages  []t.Message `json:"messages"`
 }
 
@@ -33,23 +34,28 @@ type SessionWriter struct {
 	id       string
 	model    string
 	cwd      string
+	name     string
 	started  time.Time
 	filepath string
 }
 
 // NewSessionWriter creates a new session file and returns a writer for incremental saves.
-func NewSessionWriter(model string) *SessionWriter {
+func NewSessionWriter(model, name string) *SessionWriter {
 	dir := sessionPath()
 	os.MkdirAll(dir, 0755)
 
 	id := uuid.New().String()
 	cwd, _ := os.Getwd()
 	filename := fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), id)
+	if name != "" {
+		filename = fmt.Sprintf("%s_%s_%s.json", time.Now().Format("20060102-150405"), id, name)
+	}
 
 	return &SessionWriter{
 		id:       id,
 		model:    model,
 		cwd:      cwd,
+		name:     name,
 		started:  time.Now(),
 		filepath: filepath.Join(dir, filename),
 	}
@@ -76,6 +82,7 @@ func SessionWriterForExisting(sess *Session) *SessionWriter {
 		id:       sess.ID,
 		model:    sess.Model,
 		cwd:      sess.Cwd,
+		name:     sess.Name,
 		started:  sess.StartedAt,
 		filepath: fp,
 	}
@@ -88,6 +95,7 @@ func (sw *SessionWriter) Save(messages []t.Message) error {
 		Title:     sessionTitle(messages),
 		Model:     sw.model,
 		Cwd:       sw.cwd,
+		Name:      sw.name,
 		StartedAt: sw.started,
 		Messages:  messages,
 	}
@@ -163,6 +171,26 @@ func LoadSessionByID(id string) (*Session, error) {
 	return nil, fmt.Errorf("session %s not found", id)
 }
 
+// LoadSessionByName loads a session by its name from the filename.
+func LoadSessionByName(name string) (*Session, error) {
+	dir := sessionPath()
+	matches, err := filepath.Glob(filepath.Join(dir, "*_"+name+".json"))
+	if err != nil || len(matches) == 0 {
+		return nil, fmt.Errorf("session %q not found", name)
+	}
+	// Use the most recent match (last alphabetically since filenames start with timestamp)
+	fp := matches[len(matches)-1]
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, err
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
 // LoadLastSession loads the most recent session.
 func LoadLastSession() (*Session, error) {
 	sessions, err := loadAllSessions()
@@ -209,6 +237,9 @@ func ListSessions(limit int) {
 
 		age := relativeTime(lastMessageTime(sess))
 		short := sess.ID[:8]
+		if sess.Name != "" {
+			short = fmt.Sprintf("[%s]", sess.Name)
+		}
 
 		fmt.Printf("%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
 	}
