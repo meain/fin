@@ -196,6 +196,12 @@ func (a *Agent) run(ctx context.Context) error {
 			wg.Add(1)
 			go func(i int, tl tool.Tool, name string, args map[string]any) {
 				defer wg.Done()
+				// For shell tools, create a per-call copy with output callback
+				if _, ok := tl.(*tool.ShellTool); ok {
+					tl = &tool.ShellTool{OnOutput: func(lines int) {
+						a.ui.ToolOutput(i, lines)
+					}}
+				}
 				res, err := tl.Run(ctx, args)
 				results[i] = toolExecResult{result: res, err: err}
 				a.ui.ToolDone(i, name, args, res.Content, err)

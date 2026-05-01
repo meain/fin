@@ -1,10 +1,13 @@
 package tool
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
+	"sync"
 	"time"
 
 	t "github.com/meain/fin/internal/types"
@@ -13,7 +16,11 @@ import (
 const defaultShellTimeout = 7 // seconds
 
 // ShellTool executes shell commands.
-type ShellTool struct{}
+type ShellTool struct {
+	// OnOutput is called with the current line count as output streams in.
+	// Set by the agent to update the UI during execution.
+	OnOutput func(lines int)
+}
 
 func (st *ShellTool) Name() string { return "shell" }
 
@@ -53,23 +60,61 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return t.ToolResult{}, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return t.ToolResult{}, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return t.ToolResult{}, fmt.Errorf("start command: %w", err)
+	}
+
+	var stdout, stderrBuf bytes.Buffer
+	var lineCount int
+	var mu sync.Mutex
+
+	// Stream both stdout and stderr, counting lines
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			mu.Lock()
+			stdout.Write(scanner.Bytes())
+			stdout.WriteByte('\n')
+			lineCount++
+			lc := lineCount
+			mu.Unlock()
+			if st.OnOutput != nil {
+				st.OnOutput(lc)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		io.Copy(&stderrBuf, stderrPipe)
+	}()
+	wg.Wait()
+
+	err = cmd.Wait()
 
 	var result string
 	if stdout.Len() > 0 {
 		result = stdout.String()
 	}
-	if stderr.Len() > 0 {
+	if stderrBuf.Len() > 0 {
 		if result != "" {
 			result += "\nstderr:\n"
 		} else {
 			result = "stderr:\n"
 		}
-		result += stderr.String()
+		result += stderrBuf.String()
 	}
 
 	if err != nil {

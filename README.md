@@ -7,8 +7,10 @@ Opinionated CLI agent harness in Go
 - **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs via raw HTTP
 - **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees
 - **Agent skills**: [agentskills.io](https://agentskills.io) spec — progressive disclosure, project and global skills
-- **Session persistence**: Incremental saves, resume, export as JSON/HTML/message
+- **Session persistence**: Incremental saves, resume, named sessions (`-n`), export as JSON/HTML/message
 - **Session matching**: `-match` searches recent sessions by keyword relevance and offers to continue one
+- **Prompt caching**: Anthropic system prompt and tool definitions cached automatically
+- **Token usage**: Input/output token counts and cache stats displayed after each run
 - **Piped input**: `git diff | fin "review this"`
 - **Output modes**: Default (full ANSI), minimal (one-line tool summaries), quiet (stdout only)
 - **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
@@ -31,6 +33,8 @@ fin -sessions              # list last 10 sessions
 fin -all -sessions         # list all sessions
 fin -c "follow up"         # continue last session
 fin -s <uuid> "follow up"  # continue specific session (prefix match)
+fin -n mycalc "what is 2+2"   # named session (creates if new, resumes if exists)
+fin -n mycalc "what about 3+3" # continues the "mycalc" session
 fin -match "fix the auth bug"  # find relevant past session and offer to continue it
 
 # Export sessions
@@ -38,6 +42,7 @@ fin -export json           # export last session as JSON
 fin -export html           # export as HTML with rendered markdown
 fin -export message        # just the last response text
 fin -s <uuid> -export html # export specific session
+fin -n mycalc -export html # export named session
 
 # Model selection
 fin -model openai/gpt-4o "analyze this PR"
@@ -154,7 +159,7 @@ The system prompt is assembled from layers:
 
 ## Session Storage
 
-Sessions are saved incrementally to `~/.local/share/fin/sessions/` as JSON files. Each session has a UUID, auto-generated title, and per-message timestamps. Sessions are saved after every agent turn so nothing is lost if killed mid-execution.
+Sessions are saved incrementally to `~/.local/share/fin/sessions/` as JSON files. Each session has a UUID, auto-generated title, and per-message timestamps. Sessions are saved after every agent turn so nothing is lost if killed mid-execution. Named sessions (`-n`) use a human-readable name embedded in the filename for fast lookup.
 
 > Why "fin"?
 > 1. **Easy to type** — three letters, fast to invoke

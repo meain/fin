@@ -11,7 +11,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 - `agent.go` — Agent loop (stream → tool calls → execute → repeat), retry with backoff, tool approval
 - `config.go` — TOML config (`~/.config/fin/config.toml`), model alias resolution, validation
 - `prompt.go` — System prompt assembly (embedded base + runtime context + skills + AGENTS.md layers)
-- `session.go` — Incremental session persistence with UUID, title, per-message timestamps
+- `session.go` — Incremental session persistence with UUID, title, named sessions, per-message timestamps
 - `matching.go` — Session auto-matching: keyword extraction, scoring (title 3x + content + recency), `FindMatchingSessions`
 - `export.go` — Export as JSON, HTML (markdown rendering, foldable tool results, edit diffs), or last message
 - `skill.go` — Skill discovery from .agents/skills/ (project + parents + global), follows symlinks, YAML frontmatter
@@ -20,7 +20,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 - `embed.go` — Embeds `system_prompt.md` and `skills/` directory
 
 ### Internal packages
-- `internal/types/` — Shared types: Message, ToolCall, StreamDelta, CompletionRequest, ToolDef, ToolResult, Image, ExpandHome
+- `internal/types/` — Shared types: Message, ToolCall, StreamDelta, Usage, CompletionRequest, ToolDef, ToolResult, Image, ExpandHome
 - `internal/provider/` — Provider interface + Anthropic (raw HTTP + SSE) and OpenAI-compatible implementations
 - `internal/tool/` — Tool interface + read, write, edit, shell, skill tools
 
@@ -46,9 +46,10 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 fin "prompt"                    # run with prompt
 fin -c "follow up"              # continue last session
 fin -s <uuid> "follow up"      # continue specific session (prefix match)
+fin -n <name> "prompt"          # named session (resumes if exists, creates if not)
 fin -sessions                   # list last 10 sessions
 fin -all -sessions              # list all sessions
-fin -export json|html|message   # export session (uses -s for specific, else last)
+fin -export json|html|message   # export session (uses -s/-n for specific, else last)
 fin -model provider/model       # override model
 fin -ui default|minimal|quiet   # output mode
 fin -yolo                       # auto-approve all tools

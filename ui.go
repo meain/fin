@@ -52,6 +52,7 @@ const (
 	uiToolStart    // tool about to execute (shows status line)
 	uiToolDone     // tool finished (updates its status line)
 	uiToolApproval // interactive approval prompt
+	uiToolOutput   // streaming output line count update
 	uiInfo
 	uiError
 )
@@ -77,6 +78,7 @@ type toolLineState struct {
 	result  string
 	err     error
 	start   time.Time
+	lines   int // streaming line count (updated during execution)
 }
 
 // UI handles terminal output via a single goroutine that processes events.
@@ -164,6 +166,11 @@ func (u *UI) ToolStart(idx, total int, name string, args map[string]any) {
 // ToolDone marks a tool as completed and updates its status line.
 func (u *UI) ToolDone(idx int, name string, args map[string]any, result string, err error) {
 	u.send(UIEvent{Kind: uiToolDone, Index: idx, Name: name, Args: args, Result: result, Err: err})
+}
+
+// ToolOutput updates a running tool's streaming line count.
+func (u *UI) ToolOutput(idx, lines int) {
+	u.send(UIEvent{Kind: uiToolOutput, Index: idx, Total: lines})
 }
 
 // ToolCallStart shows a tool being invoked (used for approval display).
@@ -265,6 +272,12 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 	case uiToolDone:
 		u.handleToolDone(ev)
+
+	case uiToolOutput:
+		if ev.Index >= 0 && ev.Index < len(u.toolLines) && u.toolLines[ev.Index].running {
+			u.toolLines[ev.Index].lines = ev.Total
+			u.updateToolLine(ev.Index)
+		}
 
 	case uiToolApproval:
 		u.handleToolApproval(ev)
@@ -388,7 +401,9 @@ func (u *UI) updateToolLine(idx int) {
 
 	elapsedStr := formatElapsed(elapsed)
 	resultInfo := ""
-	if !tl.running && tl.err == nil {
+	if tl.running && tl.lines > 0 {
+		resultInfo = fmt.Sprintf("(%d lines) ", tl.lines)
+	} else if !tl.running && tl.err == nil {
 		lines := strings.Count(tl.result, "\n")
 		if lines > 0 {
 			resultInfo = fmt.Sprintf("(%d lines) ", lines)
@@ -397,8 +412,8 @@ func (u *UI) updateToolLine(idx int) {
 
 	if u.mode == OutputMinimal {
 		if tl.running {
-			fmt.Fprintf(stderr, "%s%s%s %s%s%s",
-				yellow, label, reset, dim, elapsedStr, reset)
+			fmt.Fprintf(stderr, "%s%s%s %s%s%s%s",
+				yellow, label, reset, dim, resultInfo, elapsedStr, reset)
 		} else if tl.err != nil {
 			fmt.Fprintf(stderr, "%s%s %serror: %s%s %s%s%s",
 				yellow, label, red, tl.err, reset, dim, elapsedStr, reset)
@@ -408,8 +423,8 @@ func (u *UI) updateToolLine(idx int) {
 		}
 	} else {
 		if tl.running {
-			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s",
-				bold, yellow, label, reset, dim, elapsedStr, reset)
+			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s%s",
+				bold, yellow, label, reset, dim, resultInfo, elapsedStr, reset)
 		} else if tl.err != nil {
 			fmt.Fprintf(stderr, "  %s%s%s%s %s%serror: %s%s %s%s%s",
 				bold, yellow, label, reset, dim, red, tl.err, reset, dim, elapsedStr, reset)
