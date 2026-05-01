@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 var stderr = os.Stderr
@@ -19,8 +20,6 @@ const (
 	magenta = "\033[35m"
 )
 
-// UI handles terminal output. When a Terminal is set, all output goes through
-// it so the user's input line is preserved. Falls back to direct stderr writes.
 // OutputMode controls how much the UI displays.
 type OutputMode int
 
@@ -30,14 +29,6 @@ const (
 	OutputQuiet                     // only final response text (stdout)
 	OutputSilent                    // no output at all (for subagents)
 )
-
-type UI struct {
-	term              *Terminal
-	mode              OutputMode
-	wroteText         bool // tracks if text was written since last newline
-	hasProgress       bool // tracks if a progress line is showing
-	lastProgressLines int  // last line count shown in progress (for throttling)
-}
 
 func parseOutputMode(s string) OutputMode {
 	switch s {
@@ -50,63 +41,249 @@ func parseOutputMode(s string) OutputMode {
 	}
 }
 
+// UIEventKind identifies the type of UI event.
+type UIEventKind int
+
+const (
+	uiAssistantLabel UIEventKind = iota
+	uiStreamText
+	uiEndStream
+	uiToolProgress // streaming tool-call argument progress
+	uiToolStart    // tool about to execute (shows status line)
+	uiToolDone     // tool finished (updates its status line)
+	uiToolApproval // interactive approval prompt
+	uiInfo
+	uiError
+)
+
+// UIEvent is a message sent to the UI goroutine.
+type UIEvent struct {
+	Kind   UIEventKind
+	Text   string
+	Name   string
+	Args   map[string]any
+	Result string
+	Err    error
+	Index  int       // tool index in parallel batch
+	Total  int       // total tools in batch
+	Reply  chan bool  // for approval response
+}
+
+// toolLineState tracks one tool in a parallel batch.
+type toolLineState struct {
+	name    string
+	args    map[string]any
+	running bool
+	result  string
+	err     error
+	start   time.Time
+}
+
+// UI handles terminal output via a single goroutine that processes events.
+type UI struct {
+	term   *Terminal
+	mode   OutputMode
+	events chan UIEvent
+	done   chan struct{}
+
+	// State managed exclusively by the run() goroutine:
+	wroteText         bool
+	hasProgress       bool
+	lastProgressLines int
+	toolLines         []toolLineState
+}
+
 func NewUI(t *Terminal, mode OutputMode) *UI {
-	return &UI{term: t, mode: mode}
-}
-
-func (u *UI) write(s string) {
-	if u.term != nil {
-		u.term.WriteString(s)
-	} else {
-		fmt.Fprint(stderr, s)
+	if mode == OutputSilent {
+		return &UI{mode: mode}
 	}
+	u := &UI{
+		term:   t,
+		mode:   mode,
+		events: make(chan UIEvent, 64),
+		done:   make(chan struct{}),
+	}
+	go u.run()
+	return u
 }
 
-// AssistantLabel prints the assistant label before streaming starts.
-func (u *UI) AssistantLabel() {
-	if u.mode != OutputNormal {
+// Close shuts down the UI goroutine.
+func (u *UI) Close() {
+	if u.events == nil {
 		return
 	}
-	u.write(fmt.Sprintf("\n%s%sfin>%s ", bold, magenta, reset))
+	close(u.events)
+	<-u.done
 }
 
-// StreamText prints a text chunk from the assistant (during streaming).
+func (u *UI) send(ev UIEvent) {
+	if u.events == nil {
+		return
+	}
+	u.events <- ev
+}
+
+// sendSync sends an event and waits for a bool reply.
+func (u *UI) sendSync(ev UIEvent) bool {
+	if u.events == nil {
+		return false
+	}
+	u.events <- ev
+	return <-ev.Reply
+}
+
+// --- Public API (sends events) ---
+
+func (u *UI) AssistantLabel() {
+	u.send(UIEvent{Kind: uiAssistantLabel})
+}
+
 func (u *UI) StreamText(text string) {
 	if u.mode == OutputSilent {
 		return
 	}
-	if u.mode == OutputQuiet {
-		fmt.Fprint(os.Stdout, text)
-		return
-	}
-	if text != "" {
-		u.wroteText = true
-	}
-	u.write(text)
+	u.send(UIEvent{Kind: uiStreamText, Text: text})
 }
 
-// ensureNewline emits a newline if text was written without a trailing newline.
-func (u *UI) ensureNewline() {
-	if u.wroteText {
-		u.write("\n")
-		u.wroteText = false
-	}
-}
-
-// EndStream finishes the assistant's streaming output.
 func (u *UI) EndStream() {
+	u.send(UIEvent{Kind: uiEndStream})
+}
+
+func (u *UI) ToolCallProgress(name, argsSoFar string) {
 	if u.mode == OutputSilent {
 		return
 	}
-	u.ensureNewline()
-	if u.mode == OutputNormal {
-		u.write("\n")
+	u.send(UIEvent{Kind: uiToolProgress, Name: name, Text: argsSoFar})
+}
+
+// ToolStart registers a tool as running in the parallel batch.
+func (u *UI) ToolStart(idx, total int, name string, args map[string]any) {
+	u.send(UIEvent{Kind: uiToolStart, Index: idx, Total: total, Name: name, Args: args})
+}
+
+// ToolDone marks a tool as completed and updates its status line.
+func (u *UI) ToolDone(idx int, name string, args map[string]any, result string, err error) {
+	u.send(UIEvent{Kind: uiToolDone, Index: idx, Name: name, Args: args, Result: result, Err: err})
+}
+
+// ToolCallStart shows a tool being invoked (used for approval display).
+func (u *UI) ToolCallStart(name string, args map[string]any) {
+	u.send(UIEvent{Kind: uiToolStart, Index: -1, Total: 1, Name: name, Args: args})
+}
+
+// ToolApprovalPrompt asks the user to approve a tool call. Blocks until answered.
+func (u *UI) ToolApprovalPrompt(name string, args map[string]any) bool {
+	if u.events == nil {
+		return false
+	}
+	reply := make(chan bool, 1)
+	return u.sendSync(UIEvent{Kind: uiToolApproval, Name: name, Args: args, Reply: reply})
+}
+
+func (u *UI) Info(msg string) {
+	u.send(UIEvent{Kind: uiInfo, Text: msg})
+}
+
+func (u *UI) Error(msg string) {
+	u.send(UIEvent{Kind: uiError, Text: msg})
+}
+
+// --- Event loop ---
+
+func (u *UI) run() {
+	defer close(u.done)
+
+	var ticker *time.Ticker
+	var tickCh <-chan time.Time
+
+	for {
+		select {
+		case ev, ok := <-u.events:
+			if !ok {
+				if ticker != nil {
+					ticker.Stop()
+				}
+				return
+			}
+			u.handleEvent(ev)
+
+			// Start/stop ticker based on whether we have running tools.
+			hasRunning := u.hasRunningTools()
+			if hasRunning && ticker == nil {
+				ticker = time.NewTicker(200 * time.Millisecond)
+				tickCh = ticker.C
+			} else if !hasRunning && ticker != nil {
+				ticker.Stop()
+				ticker = nil
+				tickCh = nil
+			}
+
+		case <-tickCh:
+			u.refreshToolLines()
+		}
 	}
 }
 
-// ToolCallProgress shows live progress while tool call arguments are streaming.
-func (u *UI) ToolCallProgress(name, argsSoFar string) {
-	if u.mode == OutputQuiet || u.mode == OutputSilent {
+func (u *UI) hasRunningTools() bool {
+	for _, tl := range u.toolLines {
+		if tl.running {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *UI) handleEvent(ev UIEvent) {
+	switch ev.Kind {
+	case uiAssistantLabel:
+		if u.mode != OutputNormal {
+			return
+		}
+		u.write(fmt.Sprintf("\n%s%sfin>%s ", bold, magenta, reset))
+
+	case uiStreamText:
+		if u.mode == OutputQuiet {
+			fmt.Fprint(os.Stdout, ev.Text)
+			return
+		}
+		if ev.Text != "" {
+			u.wroteText = true
+		}
+		u.write(ev.Text)
+
+	case uiEndStream:
+		u.ensureNewline()
+		if u.mode == OutputNormal {
+			u.write("\n")
+		}
+
+	case uiToolProgress:
+		u.handleToolProgress(ev.Name, ev.Text)
+
+	case uiToolStart:
+		u.handleToolStart(ev)
+
+	case uiToolDone:
+		u.handleToolDone(ev)
+
+	case uiToolApproval:
+		u.handleToolApproval(ev)
+
+	case uiInfo:
+		if u.mode != OutputNormal {
+			return
+		}
+		u.write(fmt.Sprintf("%s%s%s\n", dim, ev.Text, reset))
+
+	case uiError:
+		u.write(fmt.Sprintf("%s%serror: %s%s\n", bold, red, ev.Text, reset))
+	}
+}
+
+// --- Tool progress (streaming args) ---
+
+func (u *UI) handleToolProgress(name, argsSoFar string) {
+	if u.mode == OutputQuiet {
 		return
 	}
 
@@ -114,8 +291,6 @@ func (u *UI) ToolCallProgress(name, argsSoFar string) {
 	if lines == 0 {
 		return
 	}
-
-	// Throttle: only update if line count changed
 	if lines == u.lastProgressLines {
 		return
 	}
@@ -130,11 +305,145 @@ func (u *UI) ToolCallProgress(name, argsSoFar string) {
 	u.hasProgress = true
 }
 
-// ToolCallStart shows a tool being invoked.
-func (u *UI) ToolCallStart(name string, args map[string]any) {
-	if u.mode == OutputSilent {
+// --- Parallel tool status lines ---
+
+func (u *UI) handleToolStart(ev UIEvent) {
+	if u.mode == OutputQuiet {
 		return
 	}
+
+	// Index -1 means this is a pre-approval display (old ToolCallStart), not a batch.
+	if ev.Index == -1 {
+		u.renderToolCallPreApproval(ev.Name, ev.Args)
+		return
+	}
+
+	// First tool in batch: clear progress, allocate lines.
+	if ev.Index == 0 {
+		if u.hasProgress {
+			fmt.Fprint(stderr, "\033[2K\r")
+			u.hasProgress = false
+			u.lastProgressLines = 0
+		} else {
+			u.ensureNewline()
+		}
+		u.toolLines = make([]toolLineState, ev.Total)
+	}
+
+	u.toolLines[ev.Index] = toolLineState{
+		name:    ev.Name,
+		args:    ev.Args,
+		running: true,
+		start:   time.Now(),
+	}
+
+	// Print the initial status line.
+	if u.mode == OutputMinimal {
+		label := toolLabel(ev.Name, ev.Args)
+		fmt.Fprintf(stderr, "%s%s%s %s…%s\n", yellow, label, reset, dim, reset)
+	} else {
+		label := toolLabel(ev.Name, ev.Args)
+		u.write(fmt.Sprintf("  %s%s%s%s %s…%s\n", bold, yellow, label, reset, dim, reset))
+	}
+}
+
+func (u *UI) handleToolDone(ev UIEvent) {
+	if u.mode == OutputQuiet {
+		return
+	}
+
+	if ev.Index < 0 || ev.Index >= len(u.toolLines) {
+		return
+	}
+
+	tl := &u.toolLines[ev.Index]
+	tl.running = false
+	tl.result = ev.Result
+	tl.err = ev.Err
+
+	// Update the line in-place.
+	u.updateToolLine(ev.Index)
+
+	// If all tools are done, clear the batch state.
+	if !u.hasRunningTools() {
+		u.toolLines = nil
+	}
+}
+
+func (u *UI) updateToolLine(idx int) {
+	if idx < 0 || idx >= len(u.toolLines) {
+		return
+	}
+
+	// Calculate distance from cursor (cursor is after the last tool line).
+	linesUp := len(u.toolLines) - idx
+	if linesUp > 0 {
+		fmt.Fprintf(stderr, "\033[%dA", linesUp)
+	}
+	fmt.Fprint(stderr, "\033[2K\r")
+
+	tl := u.toolLines[idx]
+	elapsed := time.Since(tl.start)
+	label := toolLabel(tl.name, tl.args)
+
+	elapsedStr := formatElapsed(elapsed)
+	resultInfo := ""
+	if !tl.running && tl.err == nil {
+		lines := strings.Count(tl.result, "\n")
+		if lines > 0 {
+			resultInfo = fmt.Sprintf("(%d lines) ", lines)
+		}
+	}
+
+	if u.mode == OutputMinimal {
+		if tl.running {
+			fmt.Fprintf(stderr, "%s%s%s %s%s%s",
+				yellow, label, reset, dim, elapsedStr, reset)
+		} else if tl.err != nil {
+			fmt.Fprintf(stderr, "%s%s %serror: %s%s %s%s%s",
+				yellow, label, red, tl.err, reset, dim, elapsedStr, reset)
+		} else {
+			fmt.Fprintf(stderr, "%s%s %s%s%s%s",
+				yellow, label, dim, resultInfo, elapsedStr, reset)
+		}
+	} else {
+		if tl.running {
+			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s",
+				bold, yellow, label, reset, dim, elapsedStr, reset)
+		} else if tl.err != nil {
+			fmt.Fprintf(stderr, "  %s%s%s%s %s%serror: %s%s %s%s%s",
+				bold, yellow, label, reset, dim, red, tl.err, reset, dim, elapsedStr, reset)
+		} else {
+			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s%s",
+				bold, yellow, label, reset, dim, resultInfo, elapsedStr, reset)
+		}
+	}
+
+	if linesUp > 0 {
+		fmt.Fprintf(stderr, "\033[%dB\r", linesUp)
+	}
+	stderr.Sync()
+}
+
+func (u *UI) refreshToolLines() {
+	for i, tl := range u.toolLines {
+		if tl.running {
+			u.updateToolLine(i)
+		}
+	}
+}
+
+func formatElapsed(d time.Duration) string {
+	if d < time.Second {
+		ms := d.Milliseconds()
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// --- Pre-approval display (for tools that need confirmation) ---
+
+func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 	if u.hasProgress {
 		fmt.Fprint(stderr, "\033[2K\r")
 		u.hasProgress = false
@@ -142,11 +451,8 @@ func (u *UI) ToolCallStart(name string, args map[string]any) {
 	} else {
 		u.ensureNewline()
 	}
-	if u.mode == OutputQuiet {
-		return
-	}
 	if u.mode == OutputMinimal {
-		u.toolCallMinimal(name, args)
+		u.renderMinimalToolCall(name, args)
 		return
 	}
 	u.write(fmt.Sprintf("\n  %s%s%s%s", bold, yellow, name, reset))
@@ -206,7 +512,7 @@ func (u *UI) ToolCallStart(name string, args map[string]any) {
 	u.write("\n")
 }
 
-func (u *UI) toolCallMinimal(name string, args map[string]any) {
+func (u *UI) renderMinimalToolCall(name string, args map[string]any) {
 	switch name {
 	case "shell":
 		cmd, _ := args["command"].(string)
@@ -242,40 +548,46 @@ func (u *UI) toolCallMinimal(name string, args map[string]any) {
 	}
 }
 
-// ToolCallDone shows a completed tool call with its name, args, and result on a compact line.
-func (u *UI) ToolCallDone(name string, args map[string]any, result string, err error) {
-	if u.mode == OutputQuiet || u.mode == OutputSilent {
-		return
-	}
+// --- Approval prompt ---
 
-	label := u.toolLabel(name, args)
-	lines := strings.Count(result, "\n")
-
-	if u.mode == OutputMinimal {
-		if err != nil {
-			fmt.Fprintf(stderr, "%s%s %serror: %s%s\n", yellow, label, red, err, reset)
-		} else if lines > 0 {
-			fmt.Fprintf(stderr, "%s%s %s(%d lines)%s\n", yellow, label, dim, lines, reset)
-		} else {
-			fmt.Fprintf(stderr, "%s%s%s\n", yellow, label, reset)
+func (u *UI) handleToolApproval(ev UIEvent) {
+	var approved bool
+	if u.term != nil {
+		u.term.WriteString(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		line, err := u.term.ReadLine("")
+		if err == nil {
+			line = strings.TrimSpace(strings.ToLower(line))
+			approved = line == "y" || line == "yes"
 		}
-		return
-	}
-
-	u.write(fmt.Sprintf("  %s%s%s%s", bold, yellow, label, reset))
-	if err != nil {
-		u.write(fmt.Sprintf(" %s%serror: %s%s\n", dim, red, err, reset))
-		return
-	}
-	if lines > 0 {
-		u.write(fmt.Sprintf(" %s(%d lines)%s\n", dim, lines, reset))
 	} else {
+		u.write(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		var input string
+		fmt.Scanln(&input)
+		input = strings.TrimSpace(strings.ToLower(input))
+		approved = input == "y" || input == "yes"
+	}
+	ev.Reply <- approved
+}
+
+// --- Helpers ---
+
+func (u *UI) write(s string) {
+	if u.term != nil {
+		u.term.WriteString(s)
+	} else {
+		fmt.Fprint(stderr, s)
+	}
+}
+
+func (u *UI) ensureNewline() {
+	if u.wroteText {
 		u.write("\n")
+		u.wroteText = false
 	}
 }
 
 // toolLabel returns a short description like "read agent.go" or "shell $ ls".
-func (u *UI) toolLabel(name string, args map[string]any) string {
+func toolLabel(name string, args map[string]any) string {
 	switch name {
 	case "shell":
 		if cmd, ok := args["command"].(string); ok {
@@ -311,76 +623,4 @@ func (u *UI) toolLabel(name string, args map[string]any) string {
 		}
 	}
 	return name
-}
-
-// ToolCallResult shows abbreviated tool output.
-func (u *UI) ToolCallResult(result string, err error) {
-	if u.mode == OutputQuiet || u.mode == OutputSilent {
-		return
-	}
-	if u.mode == OutputMinimal {
-		if err != nil {
-			fmt.Fprintf(stderr, " %serror: %s%s\n", red, err, reset)
-		} else if result != "" {
-			lines := strings.Count(result, "\n")
-			if lines > 0 {
-				fmt.Fprintf(stderr, " %s(%d lines)%s\n", dim, lines, reset)
-			} else {
-				fmt.Fprintln(stderr)
-			}
-		} else {
-			fmt.Fprintln(stderr)
-		}
-		return
-	}
-
-	if err != nil {
-		u.write(fmt.Sprintf("  %s%serror: %s%s\n", dim, red, err, reset))
-		return
-	}
-
-	lines := strings.Split(result, "\n")
-	if len(lines) > 10 {
-		for _, line := range lines[:5] {
-			u.write(fmt.Sprintf("  %s%s%s\n", dim, line, reset))
-		}
-		u.write(fmt.Sprintf("  %s… %d lines total%s\n", dim, len(lines), reset))
-	} else {
-		for _, line := range lines {
-			if line != "" {
-				u.write(fmt.Sprintf("  %s%s%s\n", dim, line, reset))
-			}
-		}
-	}
-}
-
-// ToolApprovalPrompt asks the user to approve a tool call. Returns true if approved.
-func (u *UI) ToolApprovalPrompt(name string, args map[string]any) bool {
-	if u.term != nil {
-		u.term.WriteString(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, name, reset))
-		line, err := u.term.ReadLine("")
-		if err != nil {
-			return false
-		}
-		line = strings.TrimSpace(strings.ToLower(line))
-		return line == "y" || line == "yes"
-	}
-	u.write(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, name, reset))
-	var input string
-	fmt.Scanln(&input)
-	input = strings.TrimSpace(strings.ToLower(input))
-	return input == "y" || input == "yes"
-}
-
-// Info prints an informational message.
-func (u *UI) Info(msg string) {
-	if u.mode != OutputNormal {
-		return
-	}
-	u.write(fmt.Sprintf("%s%s%s\n", dim, msg, reset))
-}
-
-// Error prints an error message.
-func (u *UI) Error(msg string) {
-	u.write(fmt.Sprintf("%s%serror: %s%s\n", bold, red, msg, reset))
 }

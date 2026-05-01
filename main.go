@@ -115,6 +115,7 @@ func main() {
 	skills := DiscoverSkills(config)
 
 	ui := NewUI(nil, outMode)
+	defer ui.Close()
 	agent := NewAgent(&modelInjector{provider: p, model: modelName}, config, ui, skills)
 
 	args := flag.Args()

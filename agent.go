@@ -171,33 +171,40 @@ func (a *Agent) run(ctx context.Context) error {
 			items[i] = approvedTool{tc: tc, tool: tl, args: args, err: err}
 		}
 
-		// Phase 2: execute approved tools in parallel
+		// Phase 2: register tools with UI, then execute in parallel
 		type toolExecResult struct {
 			result t.ToolResult
 			err    error
 		}
 		results := make([]toolExecResult, len(items))
-		var wg sync.WaitGroup
+
 		for i, item := range items {
 			if item.err != nil {
 				results[i] = toolExecResult{err: item.err}
+			} else {
+				a.ui.ToolStart(i, len(items), item.tc.Name, item.args)
+			}
+		}
+
+		var wg sync.WaitGroup
+		for i, item := range items {
+			if item.err != nil {
+				a.ui.ToolDone(i, item.tc.Name, item.args, "", item.err)
 				continue
 			}
 			wg.Add(1)
-			go func(i int, tl tool.Tool, args map[string]any) {
+			go func(i int, tl tool.Tool, name string, args map[string]any) {
 				defer wg.Done()
 				res, err := tl.Run(ctx, args)
 				results[i] = toolExecResult{result: res, err: err}
-			}(i, item.tool, item.args)
+				a.ui.ToolDone(i, name, args, res.Content, err)
+			}(i, item.tool, item.tc.Name, item.args)
 		}
 		wg.Wait()
 
-		// Phase 3: display results and build messages
+		// Phase 3: build messages (display already happened via ToolDone)
 		for i, item := range items {
 			r := results[i]
-			if item.err == nil {
-				a.ui.ToolCallDone(item.tc.Name, item.args, r.result.Content, r.err)
-			}
 			msg := t.Message{
 				Role:       t.RoleTool,
 				ToolCallID: item.tc.ID,
