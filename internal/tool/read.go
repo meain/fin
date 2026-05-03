@@ -114,9 +114,7 @@ func readFile(path string, args map[string]any) (string, error) {
 		offset = len(lines)
 	}
 	end := offset + limit
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end = min(end, len(lines))
 
 	var b strings.Builder
 	for i := offset; i < end; i++ {
@@ -125,7 +123,74 @@ func readFile(path string, args map[string]any) (string, error) {
 	return b.String(), nil
 }
 
+const maxDirEntries = 1000
+
 func readDir(root string) (string, error) {
+	// Count total entries to decide between tree and flat listing.
+	total := 0
+	tooMany := false
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		if rel == "." {
+			return nil
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		for _, p := range parts {
+			if strings.HasPrefix(p, ".") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		depth := len(parts) - 1
+		if depth > 3 {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		total++
+		if total > maxDirEntries {
+			tooMany = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	if tooMany {
+		return readDirFlat(root)
+	}
+	return readDirTree(root)
+}
+
+// readDirFlat lists only the immediate children of root.
+func readDirFlat(root string) (string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory %s: %w", root, err)
+	}
+
+	var b strings.Builder
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.IsDir() {
+			fmt.Fprintf(&b, "%s/\n", e.Name())
+		} else {
+			fmt.Fprintf(&b, "%s\n", e.Name())
+		}
+	}
+	fmt.Fprintf(&b, "\n[directory has too many entries for full tree — showing top-level only. Read specific subdirectories to explore further.]\n")
+	return b.String(), nil
+}
+
+// readDirTree walks up to depth 3, printing an indented tree.
+func readDirTree(root string) (string, error) {
 	var b strings.Builder
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
