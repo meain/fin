@@ -31,6 +31,7 @@ type Message struct {
 	ToolCallID  string     `json:"tool_call_id,omitempty"`
 	Timestamp   time.Time  `json:"timestamp,omitempty"`
 	SubMessages []Message  `json:"sub_messages,omitempty"` // subagent conversation
+	Usage       *Usage     `json:"usage,omitempty"`
 }
 
 // ToolCall represents a tool invocation requested by the model.

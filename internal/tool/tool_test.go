@@ -45,11 +45,11 @@ func TestFind(t *testing.T) {
 func TestBuiltinTools(t *testing.T) {
 	tools := BuiltinTools()
 
-	if len(tools) != 4 {
-		t.Fatalf("BuiltinTools() returned %d tools, want 4", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("BuiltinTools() returned %d tools, want 5", len(tools))
 	}
 
-	expected := []string{"read", "write", "edit", "shell"}
+	expected := []string{"read", "write", "edit", "shell", "compact"}
 	for i, name := range expected {
 		if tools[i].Name() != name {
 			t.Errorf("tools[%d].Name() = %q, want %q", i, tools[i].Name(), name)

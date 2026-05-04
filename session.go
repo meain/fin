@@ -16,13 +16,14 @@ import (
 const sessionDir = "~/.local/share/fin/sessions"
 
 type Session struct {
-	ID        string      `json:"id"`
-	Title     string      `json:"title"`
-	Model     string      `json:"model"`
-	Cwd       string      `json:"cwd"`
-	Name      string      `json:"name,omitempty"`
-	StartedAt time.Time   `json:"started_at"`
-	Messages  []t.Message `json:"messages"`
+	ID              string      `json:"id"`
+	Title           string      `json:"title"`
+	Model           string      `json:"model"`
+	Cwd             string      `json:"cwd"`
+	Name            string      `json:"name,omitempty"`
+	PreviousSession string      `json:"previous_session,omitempty"`
+	StartedAt       time.Time   `json:"started_at"`
+	Messages        []t.Message `json:"messages"`
 }
 
 func sessionPath() string {
@@ -31,12 +32,13 @@ func sessionPath() string {
 
 // SessionWriter handles incremental session saving to a stable file.
 type SessionWriter struct {
-	id       string
-	model    string
-	cwd      string
-	name     string
-	started  time.Time
-	filepath string
+	id              string
+	model           string
+	cwd             string
+	name            string
+	previousSession string
+	started         time.Time
+	filepath        string
 }
 
 // NewSessionWriter creates a new session file and returns a writer for incremental saves.
@@ -91,13 +93,14 @@ func SessionWriterForExisting(sess *Session) *SessionWriter {
 // Save writes the current messages to disk.
 func (sw *SessionWriter) Save(messages []t.Message) error {
 	sess := Session{
-		ID:        sw.id,
-		Title:     sessionTitle(messages),
-		Model:     sw.model,
-		Cwd:       sw.cwd,
-		Name:      sw.name,
-		StartedAt: sw.started,
-		Messages:  messages,
+		ID:              sw.id,
+		Title:           sessionTitle(messages),
+		Model:           sw.model,
+		Cwd:             sw.cwd,
+		Name:            sw.name,
+		PreviousSession: sw.previousSession,
+		StartedAt:       sw.started,
+		Messages:        messages,
 	}
 
 	data, err := json.MarshalIndent(sess, "", "  ")
@@ -238,7 +241,7 @@ func ListSessions(limit int) {
 		age := relativeTime(lastMessageTime(sess))
 		short := sess.ID[:8]
 		if sess.Name != "" {
-			short = fmt.Sprintf("[%s]", sess.Name)
+			short = fmt.Sprintf("%s [%s]", short, sess.Name)
 		}
 
 		fmt.Printf("%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)

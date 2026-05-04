@@ -636,6 +636,8 @@ func toolLabel(name string, args map[string]any) string {
 			}
 			return name + reset + " " + dim + display
 		}
+	case "compact":
+		return name
 	}
 	return name
 }

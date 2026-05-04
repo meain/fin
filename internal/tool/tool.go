@@ -37,12 +37,13 @@ func Find(tools []Tool, name string) Tool {
 	return nil
 }
 
-// BuiltinTools returns the built-in tool set (read, write, edit, shell).
+// BuiltinTools returns the built-in tool set.
 func BuiltinTools() []Tool {
 	return []Tool{
 		&ReadTool{},
 		&WriteTool{},
 		&EditTool{},
 		&ShellTool{},
+		&CompactTool{},
 	}
 }

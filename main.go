@@ -168,6 +168,11 @@ func main() {
 	agent.OnUpdate = func(msgs []t.Message) {
 		_ = sw.Save(msgs)
 	}
+	agent.OnCompact = func() {
+		prevID := sw.id
+		sw = NewSessionWriter(modelStr, "")
+		sw.previousSession = prevID
+	}
 
 	if len(args) == 0 && pipedInput == "" {
 		fmt.Fprintf(os.Stderr, "usage: fin [flags] \"prompt\"\n")
@@ -186,6 +191,7 @@ func main() {
 			prompt = pipedInput
 		}
 	}
+
 	if err := agent.AddUserMessage(ctx, prompt); err != nil {
 		ui.Error(err.Error())
 		os.Exit(1)

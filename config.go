@@ -62,7 +62,8 @@ func defaultConfig() Config {
 			"edit":      {Approval: "confirm"},
 			"shell":     {Approval: "confirm"},
 			"use_skill": {Approval: "auto"},
-			"subagent": {Approval: "auto"},
+			"subagent":  {Approval: "auto"},
+			"compact":   {Approval: "auto"},
 		},
 	}
 }

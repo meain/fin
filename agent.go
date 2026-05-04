@@ -26,7 +26,8 @@ type Agent struct {
 	skills   []*Skill
 	messages []t.Message
 	Usage    t.Usage // accumulated token usage across all turns
-	OnUpdate func([]t.Message)
+	OnUpdate  func([]t.Message)
+	OnCompact func() // called when conversation is compacted into a new session
 }
 
 func NewAgent(p provider.Provider, config *Config, ui *UI, skills []*Skill) *Agent {
@@ -121,6 +122,7 @@ func (a *Agent) AddUserMessage(ctx context.Context, content string) error {
 	return a.run(ctx)
 }
 
+
 func (a *Agent) run(ctx context.Context) error {
 	maxTurns := a.config.Settings.MaxTurns
 	if maxTurns <= 0 {
@@ -209,6 +211,30 @@ func (a *Agent) run(ctx context.Context) error {
 		}
 		wg.Wait()
 
+		// Check for compact tool
+		var compactSummary string
+		for i, item := range items {
+			if item.tc.Name == "compact" && item.err == nil && results[i].err == nil {
+				if s, _ := item.args["summary"].(string); s != "" {
+					compactSummary = s
+					break
+				}
+			}
+		}
+		if compactSummary != "" {
+			systemMsg := a.messages[0]
+			a.messages = []t.Message{
+				systemMsg,
+				{Role: t.RoleUser, Content: "Summary of previous conversation:\n\n" + compactSummary, Timestamp: time.Now()},
+			}
+			if a.OnCompact != nil {
+				a.OnCompact()
+			}
+			a.save()
+			a.ui.Info("conversation compacted")
+			continue
+		}
+
 		// Phase 3: build messages (display already happened via ToolDone)
 		for i, item := range items {
 			r := results[i]
@@ -243,6 +269,7 @@ func (a *Agent) save() {
 func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 	msg := t.Message{Role: t.RoleAssistant, Timestamp: time.Now()}
 	var contentBuf strings.Builder
+	var msgUsage t.Usage
 
 	toolCalls := map[int]*t.ToolCall{}
 
@@ -260,6 +287,11 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 			a.Usage.OutputTokens += delta.Usage.OutputTokens
 			a.Usage.CacheCreationInputTokens += delta.Usage.CacheCreationInputTokens
 			a.Usage.CacheReadInputTokens += delta.Usage.CacheReadInputTokens
+
+			msgUsage.InputTokens += delta.Usage.InputTokens
+			msgUsage.OutputTokens += delta.Usage.OutputTokens
+			msgUsage.CacheCreationInputTokens += delta.Usage.CacheCreationInputTokens
+			msgUsage.CacheReadInputTokens += delta.Usage.CacheReadInputTokens
 		}
 
 		if delta.Content != "" {
@@ -285,6 +317,9 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 	}
 
 	msg.Content = contentBuf.String()
+	if msgUsage.InputTokens > 0 || msgUsage.OutputTokens > 0 {
+		msg.Usage = &msgUsage
+	}
 
 	if len(toolCalls) > 0 {
 		maxIdx := 0
