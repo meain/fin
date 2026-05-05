@@ -421,9 +421,10 @@ func (u *UI) updateToolLine(idx int) {
 
 	// Build suffix (always shown) and determine space for label
 	var suffix string
+	labelColor := yellow
 	if tl.err != nil {
-		errMsg := tl.err.Error()
-		suffix = fmt.Sprintf(" %serror: %s%s %s%s%s", red, errMsg, reset, dim, elapsedStr, reset)
+		labelColor = red
+		suffix = fmt.Sprintf(" %s(error) %s%s", dim, elapsedStr, reset)
 	} else {
 		suffix = fmt.Sprintf(" %s%s%s%s", dim, resultInfo, elapsedStr, reset)
 	}
@@ -438,7 +439,7 @@ func (u *UI) updateToolLine(idx int) {
 	maxLabel := getTermWidth() - len(prefix) - suffixVisible - 1
 	label = truncateVisible(label, maxLabel)
 
-	fmt.Fprintf(stderr, "%s%s%s%s%s", prefix, bold, yellow, label, reset+suffix)
+	fmt.Fprintf(stderr, "%s%s%s%s%s", prefix, bold, labelColor, label, reset+suffix)
 
 	if linesUp > 0 {
 		fmt.Fprintf(stderr, "\033[%dB\r", linesUp)
