@@ -700,6 +700,7 @@ func toolLabel(name string, args map[string]any) string {
 	switch name {
 	case "shell":
 		if cmd, ok := args["command"].(string); ok {
+			cmd = strings.ReplaceAll(cmd, "\n", `\n`)
 			return name + reset + " " + dim + "$ " + cmd
 		}
 	case "read":
