@@ -13,7 +13,7 @@ import (
 	t "github.com/meain/fin/internal/types"
 )
 
-const defaultShellTimeout = 7 // seconds
+const defaultShellTimeout = 30 // seconds
 
 // ShellTool executes shell commands.
 type ShellTool struct {
@@ -38,7 +38,7 @@ func (st *ShellTool) Parameters() map[string]any {
 			},
 			"timeout": map[string]any{
 				"type":        "integer",
-				"description": "Timeout in seconds (default 120)",
+				"description": "Timeout in seconds (default 30)",
 			},
 		},
 		"required": []string{"command"},
