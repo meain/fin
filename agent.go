@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -143,7 +144,7 @@ func (a *Agent) run(ctx context.Context) error {
 		stream, err := a.streamWithRetry(ctx, req)
 		if err != nil {
 			a.ui.EndStream()
-			return fmt.Errorf("completion failed: %w", err)
+			return err
 		}
 
 		assistantMsg, err := a.consumeStream(stream)
@@ -411,19 +412,15 @@ func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (p
 
 		lastErr = err
 
-		errStr := err.Error()
-		retryable := strings.Contains(errStr, "429") ||
-			strings.Contains(errStr, "500") ||
-			strings.Contains(errStr, "502") ||
-			strings.Contains(errStr, "503") ||
-			strings.Contains(errStr, "529")
+		var apiErr *provider.APIError
+		retryable := errors.As(err, &apiErr) && apiErr.Retryable()
 
 		if !retryable || attempt == maxRetries {
 			return nil, err
 		}
 
 		delay := retryDelay(attempt)
-		a.ui.Error(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), errStr))
+		a.ui.Error(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), err))
 
 		select {
 		case <-ctx.Done():

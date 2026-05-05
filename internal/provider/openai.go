@@ -148,7 +148,7 @@ func (p *openaiProvider) StreamCompletion(ctx context.Context, req t.CompletionR
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai API error (status %d): %s", resp.StatusCode, string(b))
+		return nil, &APIError{Provider: "openai", StatusCode: resp.StatusCode, Body: b}
 	}
 
 	return &openaiStream{

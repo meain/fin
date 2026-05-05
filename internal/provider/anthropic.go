@@ -281,7 +281,7 @@ func (p *anthropicProvider) StreamCompletion(ctx context.Context, req t.Completi
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(b))
+		return nil, &APIError{Provider: "anthropic", StatusCode: resp.StatusCode, Body: b}
 	}
 
 	return &anthropicStream{
