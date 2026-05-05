@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var stderr = os.Stderr
@@ -351,12 +353,19 @@ func (u *UI) handleToolStart(ev UIEvent) {
 	}
 
 	// Print the initial status line.
+	suffix := fmt.Sprintf(" %s…%s", dim, reset)
+	suffixVis := visibleLen(suffix)
+	prefix := "  "
 	if u.mode == OutputMinimal {
-		label := toolLabel(ev.Name, ev.Args)
-		fmt.Fprintf(stderr, "%s%s%s %s…%s\n", yellow, label, reset, dim, reset)
+		prefix = ""
+	}
+	maxLabel := getTermWidth() - len(prefix) - suffixVis
+	label := truncateVisible(toolLabel(ev.Name, ev.Args), maxLabel)
+	line := fmt.Sprintf("%s%s%s%s%s", prefix, bold, yellow, label, reset+suffix)
+	if u.mode == OutputMinimal {
+		fmt.Fprintf(stderr, "%s\n", line)
 	} else {
-		label := toolLabel(ev.Name, ev.Args)
-		u.write(fmt.Sprintf("  %s%s%s%s %s…%s\n", bold, yellow, label, reset, dim, reset))
+		u.write(line + "\n")
 	}
 }
 
@@ -410,29 +419,26 @@ func (u *UI) updateToolLine(idx int) {
 		}
 	}
 
-	if u.mode == OutputMinimal {
-		if tl.running {
-			fmt.Fprintf(stderr, "%s%s%s %s%s%s%s",
-				yellow, label, reset, dim, resultInfo, elapsedStr, reset)
-		} else if tl.err != nil {
-			fmt.Fprintf(stderr, "%s%s %serror: %s%s %s%s%s",
-				yellow, label, red, tl.err, reset, dim, elapsedStr, reset)
-		} else {
-			fmt.Fprintf(stderr, "%s%s %s%s%s%s",
-				yellow, label, dim, resultInfo, elapsedStr, reset)
-		}
+	// Build suffix (always shown) and determine space for label
+	var suffix string
+	if tl.err != nil {
+		errMsg := tl.err.Error()
+		suffix = fmt.Sprintf(" %serror: %s%s %s%s%s", red, errMsg, reset, dim, elapsedStr, reset)
 	} else {
-		if tl.running {
-			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s%s",
-				bold, yellow, label, reset, dim, resultInfo, elapsedStr, reset)
-		} else if tl.err != nil {
-			fmt.Fprintf(stderr, "  %s%s%s%s %s%serror: %s%s %s%s%s",
-				bold, yellow, label, reset, dim, red, tl.err, reset, dim, elapsedStr, reset)
-		} else {
-			fmt.Fprintf(stderr, "  %s%s%s%s %s%s%s%s",
-				bold, yellow, label, reset, dim, resultInfo, elapsedStr, reset)
-		}
+		suffix = fmt.Sprintf(" %s%s%s%s", dim, resultInfo, elapsedStr, reset)
 	}
+
+	prefix := ""
+	if u.mode != OutputMinimal {
+		prefix = "  "
+	}
+
+	// Truncate label to fit: width - prefix - suffix_visible - 1 (space after label)
+	suffixVisible := visibleLen(suffix)
+	maxLabel := getTermWidth() - len(prefix) - suffixVisible - 1
+	label = truncateVisible(label, maxLabel)
+
+	fmt.Fprintf(stderr, "%s%s%s%s%s", prefix, bold, yellow, label, reset+suffix)
 
 	if linesUp > 0 {
 		fmt.Fprintf(stderr, "\033[%dB\r", linesUp)
@@ -599,6 +605,92 @@ func (u *UI) ensureNewline() {
 		u.write("\n")
 		u.wroteText = false
 	}
+}
+
+func getTermWidth() int {
+	w, _, _ := term.GetSize(int(os.Stderr.Fd()))
+	if w <= 0 {
+		w = 80
+	}
+	return w - 1 // leave 1 col to prevent terminal line wrap
+}
+
+// visibleLen returns the number of visible (non-ANSI-escape) characters in s.
+func visibleLen(s string) int {
+	n := 0
+	inEsc := false
+	for _, r := range s {
+		if inEsc {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// truncateVisible truncates s (which may contain ANSI codes) so the total
+// visible width (including the trailing "…") does not exceed maxVisible.
+func truncateVisible(s string, maxVisible int) string {
+	if maxVisible <= 0 {
+		return ""
+	}
+
+	// First pass: count visible chars to see if truncation is needed.
+	visibleTotal := 0
+	inEsc := false
+	for _, r := range s {
+		if inEsc {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		visibleTotal++
+	}
+	if visibleTotal <= maxVisible {
+		return s
+	}
+
+	// Need to truncate: keep maxVisible-1 visible chars + "…"
+	cutoff := maxVisible - 1
+	if cutoff < 0 {
+		cutoff = 0
+	}
+	var out strings.Builder
+	visible := 0
+	inEsc = false
+	for _, r := range s {
+		if inEsc {
+			out.WriteRune(r)
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\033' {
+			inEsc = true
+			out.WriteRune(r)
+			continue
+		}
+		if visible >= cutoff {
+			out.WriteString("…" + reset)
+			return out.String()
+		}
+		out.WriteRune(r)
+		visible++
+	}
+	return out.String()
 }
 
 // toolLabel returns a short description like "read agent.go" or "shell $ ls".
