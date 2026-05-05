@@ -83,3 +83,19 @@ TOML at `~/.config/fin/config.toml`:
 
 1. Create `skills/<name>/SKILL.md` with YAML frontmatter (name, description) and markdown body
 2. It gets embedded automatically via `embed.go` and loaded in `agent.go`'s `loadBuiltinSkills()`
+
+## Debugging past runs
+
+Use sessions to review how fin handled a task and identify agent behavior issues:
+
+```
+go run . -all -sessions              # list all sessions (grep to find by keyword)
+go run . -s <uuid-prefix> -export json   # export full conversation as JSON
+go run . -s <uuid-prefix> -export html   # export as readable HTML (good for sharing)
+```
+
+The JSON export contains every message (system, user, assistant, tool results) with timestamps and token usage. Look for:
+- Repeated failed tool calls (especially edit failures from whitespace mismatches)
+- Unnecessary tool calls (grep after already reading the full file)
+- Excessive turns for simple tasks
+- Verbose narration instead of just doing the work
