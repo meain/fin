@@ -118,7 +118,7 @@ func readFile(path string, args map[string]any) (string, error) {
 
 	var b strings.Builder
 	for i := offset; i < end; i++ {
-		fmt.Fprintf(&b, "%d\t%s\n", i+1, lines[i])
+		fmt.Fprintf(&b, "%d│%s\n", i+1, lines[i])
 	}
 	return b.String(), nil
 }
