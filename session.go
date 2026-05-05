@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	t "github.com/meain/fin/internal/types"
+	"golang.org/x/term"
 )
 
 const sessionDir = "~/.local/share/fin/sessions"
@@ -216,6 +217,11 @@ func ListSessions(limit int) {
 		sessions = sessions[:limit]
 	}
 
+	termWidth, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	if termWidth <= 0 {
+		termWidth = 80
+	}
+
 	for _, sess := range sessions {
 		title := sess.Title
 		if title == "" {
@@ -226,10 +232,9 @@ func ListSessions(limit int) {
 					break
 				}
 			}
-			if len(title) > 50 {
-				title = title[:50] + "…"
-			}
 		}
+		// Replace newlines with spaces for single-line display
+		title = strings.ReplaceAll(title, "\n", " ")
 
 		msgCount := 0
 		for _, m := range sess.Messages {
@@ -244,7 +249,18 @@ func ListSessions(limit int) {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
 		}
 
-		fmt.Printf("%s %s \033[2m(%s, %d msgs)\033[0m\n", short, title, age, msgCount)
+		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)
+		// visible: short + " " + title + " " + meta
+		maxTitle := termWidth - len(short) - len(meta) - 2
+		if maxTitle < 10 {
+			maxTitle = 10
+		}
+		titleRunes := []rune(title)
+		if len(titleRunes) > maxTitle {
+			title = string(titleRunes[:maxTitle-1]) + "…"
+		}
+
+		fmt.Printf("%s %s \033[2m%s\033[0m\n", short, title, meta)
 	}
 
 	if limit > 0 && total > limit {
