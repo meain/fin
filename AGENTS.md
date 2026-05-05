@@ -37,6 +37,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 - `types.ExpandHome()` handles `~/` paths — use it in tools that accept file paths
 - Piped stdin is detected and prepended to the prompt
 - Rate limits (429) and server errors (5xx) retried with exponential backoff + jitter (max 3)
+- All terminal output must go through the UI layer (`ui.go`) — never `fmt.Fprintf(os.Stderr, ...)` directly
 - ANSI escape codes directly — no color/TUI libraries
 - System prompt and builtin skills are embedded markdown files
 

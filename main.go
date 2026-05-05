@@ -194,6 +194,7 @@ func main() {
 
 	if err := agent.AddUserMessage(ctx, prompt); err != nil {
 		ui.Error(err.Error())
+		ui.Close()
 		os.Exit(1)
 	}
 

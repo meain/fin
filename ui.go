@@ -111,13 +111,14 @@ func NewUI(t *Terminal, mode OutputMode) *UI {
 	return u
 }
 
-// Close shuts down the UI goroutine.
+// Close shuts down the UI goroutine. Safe to call multiple times.
 func (u *UI) Close() {
 	if u.events == nil {
 		return
 	}
 	close(u.events)
 	<-u.done
+	u.events = nil
 }
 
 func (u *UI) send(ev UIEvent) {

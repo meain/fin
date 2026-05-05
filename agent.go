@@ -423,7 +423,7 @@ func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (p
 		}
 
 		delay := retryDelay(attempt)
-		a.ui.Info(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), errStr))
+		a.ui.Error(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), errStr))
 
 		select {
 		case <-ctx.Done():
