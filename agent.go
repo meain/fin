@@ -21,6 +21,7 @@ import (
 // Agent orchestrates the conversation loop between user, LLM, and tools.
 type Agent struct {
 	provider provider.Provider
+	model    string // model name for tagging assistant messages
 	tools    []tool.Tool
 	config   *Config
 	ui       *UI
@@ -31,12 +32,13 @@ type Agent struct {
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, config *Config, ui *UI, skills []*Skill) *Agent {
+func NewAgent(p provider.Provider, model string, config *Config, ui *UI, skills []*Skill) *Agent {
 	tools := buildTools(skills)
 	systemPrompt := buildSystemPrompt(config, skills)
 
 	a := &Agent{
 		provider: p,
+		model:    model,
 		tools:    tools,
 		config:   config,
 		ui:       ui,
@@ -268,7 +270,7 @@ func (a *Agent) save() {
 }
 
 func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
-	msg := t.Message{Role: t.RoleAssistant, Timestamp: time.Now()}
+	msg := t.Message{Role: t.RoleAssistant, Model: a.model, Timestamp: time.Now()}
 	var contentBuf strings.Builder
 	var msgUsage t.Usage
 
@@ -465,6 +467,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 	systemPrompt := buildSystemPrompt(a.config, a.skills)
 
 	p := a.provider
+	childModel := a.model
 	if model != "" {
 		providerName, modelName := resolveModel(model, a.config)
 		providerCfg, ok := a.config.Providers[providerName]
@@ -480,11 +483,13 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 			return t.ToolResult{}, fmt.Errorf("failed to create provider for subagent: %w", err)
 		}
 		p = &modelInjector{provider: rawProvider, model: modelName}
+		childModel = providerName + "/" + modelName
 	}
 
 	childUI := NewUI(nil, OutputSilent)
 	child := &Agent{
 		provider: p,
+		model:    childModel,
 		tools:    childTools,
 		config:   a.config,
 		ui:       childUI,

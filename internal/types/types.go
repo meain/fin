@@ -29,6 +29,7 @@ type Message struct {
 	Images      []Image    `json:"images,omitempty"`
 	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	Model       string     `json:"model,omitempty"`
 	Timestamp   time.Time  `json:"timestamp,omitempty"`
 	SubMessages []Message  `json:"sub_messages,omitempty"` // subagent conversation
 	Usage       *Usage     `json:"usage,omitempty"`

@@ -164,6 +164,7 @@ func main() {
 	}
 
 	providerName, modelName := resolveModel(modelStr, config)
+	fullModel := providerName + "/" + modelName
 	providerCfg, ok := config.Providers[providerName]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "error: unknown provider %q\n", providerName)
@@ -182,7 +183,7 @@ func main() {
 
 	ui := NewUI(nil, outMode)
 	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, config, ui, skills)
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, ui, skills)
 
 	if resumedSession != nil {
 		agent.SetMessages(resumedSession.Messages)
@@ -195,10 +196,10 @@ func main() {
 	}
 	if sw == nil {
 		if *name != "" {
-			sw = NewSessionWriter(modelStr, *name)
+			sw = NewSessionWriter(fullModel, *name)
 			ui.Info(fmt.Sprintf("new session [%s]", *name))
 		} else {
-			sw = NewSessionWriter(modelStr, "")
+			sw = NewSessionWriter(fullModel, "")
 		}
 	}
 	agent.OnUpdate = func(msgs []t.Message) {
@@ -206,7 +207,7 @@ func main() {
 	}
 	agent.OnCompact = func() {
 		prevID := sw.id
-		sw = NewSessionWriter(modelStr, "")
+		sw = NewSessionWriter(fullModel, "")
 		sw.previousSession = prevID
 	}
 
