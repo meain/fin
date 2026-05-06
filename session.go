@@ -161,6 +161,18 @@ func loadAllSessions() ([]Session, error) {
 	return sessions, nil
 }
 
+// LoadSessionByIndex loads the Nth most recent session (1-based).
+func LoadSessionByIndex(index int) (*Session, error) {
+	sessions, err := loadAllSessions()
+	if err != nil || len(sessions) == 0 {
+		return nil, fmt.Errorf("no sessions found")
+	}
+	if index < 1 || index > len(sessions) {
+		return nil, fmt.Errorf("session index %d out of range (1-%d)", index, len(sessions))
+	}
+	return &sessions[index-1], nil
+}
+
 // LoadSessionByID loads a session by its UUID from the JSON metadata.
 func LoadSessionByID(id string) (*Session, error) {
 	sessions, err := loadAllSessions()
@@ -222,7 +234,7 @@ func ListSessions(limit int) {
 		termWidth = 80
 	}
 
-	for _, sess := range sessions {
+	for idx, sess := range sessions {
 		title := sess.Title
 		if title == "" {
 			// Fallback for old sessions without a title
@@ -249,9 +261,10 @@ func ListSessions(limit int) {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
 		}
 
+		counter := fmt.Sprintf("%d.", idx+1)
 		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)
-		// visible: short + " " + title + " " + meta
-		maxTitle := termWidth - len(short) - len(meta) - 2
+		// visible: counter + " " + short + " " + title + " " + meta
+		maxTitle := termWidth - len(counter) - len(short) - len(meta) - 3
 		if maxTitle < 10 {
 			maxTitle = 10
 		}
@@ -260,7 +273,7 @@ func ListSessions(limit int) {
 			title = string(titleRunes[:maxTitle-1]) + "…"
 		}
 
-		fmt.Printf("%s %s \033[2m%s\033[0m\n", short, title, meta)
+		fmt.Printf("\033[2m%s\033[0m %s %s \033[2m%s\033[0m\n", counter, short, title, meta)
 	}
 
 	if limit > 0 && total > limit {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 
 	"github.com/meain/fin/internal/provider"
@@ -15,6 +16,7 @@ import (
 
 func main() {
 	model := flag.String("model", "", "model to use (provider/model)")
+	flag.StringVar(model, "m", "", "model to use (short)")
 	configPath := flag.String("config", "", "path to config file")
 	cont := flag.Bool("continue", false, "continue last session")
 	flag.BoolVar(cont, "c", false, "continue last session (short)")
@@ -50,7 +52,15 @@ func main() {
 			return LoadSessionByName(*name)
 		}
 		if *session != "" {
-			return LoadSessionByID(*session)
+			// Try as numeric index first
+			if idx, err := strconv.Atoi(*session); err == nil {
+				return LoadSessionByIndex(idx)
+			}
+			// Try as UUID prefix, then fall back to name
+			if sess, err := LoadSessionByID(*session); err == nil {
+				return sess, nil
+			}
+			return LoadSessionByName(*session)
 		}
 		return LoadLastSession()
 	}
