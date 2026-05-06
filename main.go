@@ -12,6 +12,7 @@ import (
 
 	"github.com/meain/fin/internal/provider"
 	t "github.com/meain/fin/internal/types"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -30,7 +31,19 @@ func main() {
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
 	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
+	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	flag.Parse()
+
+	switch *colorMode {
+	case "never":
+		disableColors()
+	case "auto":
+		if _, ok := os.LookupEnv("NO_COLOR"); ok || !term.IsTerminal(int(os.Stderr.Fd())) {
+			disableColors()
+		}
+	case "always":
+		// colors stay enabled
+	}
 
 	config, err := loadConfig(*configPath)
 	if err != nil {

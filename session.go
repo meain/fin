@@ -273,11 +273,11 @@ func ListSessions(limit int) {
 			title = string(titleRunes[:maxTitle-1]) + "…"
 		}
 
-		fmt.Printf("\033[2m%s\033[0m %s %s \033[2m%s\033[0m\n", counter, short, title, meta)
+		fmt.Printf("%s%s%s %s %s %s%s%s\n", dim, counter, reset, short, title, dim, meta, reset)
 	}
 
 	if limit > 0 && total > limit {
-		fmt.Fprintf(os.Stderr, "\n\033[2mshowing %d of %d sessions, use -all to see all\033[0m\n", limit, total)
+		fmt.Fprintf(os.Stderr, "\n%sshowing %d of %d sessions, use -all to see all%s\n", dim, limit, total, reset)
 	}
 }
 

@@ -11,8 +11,8 @@ import (
 
 var stderr = os.Stderr
 
-// ANSI escape codes
-const (
+// ANSI escape codes — variables so they can be cleared by disableColors().
+var (
 	reset   = "\033[0m"
 	bold    = "\033[1m"
 	dim     = "\033[2m"
@@ -21,6 +21,17 @@ const (
 	yellow  = "\033[33m"
 	magenta = "\033[35m"
 )
+
+// disableColors clears all ANSI escape code variables.
+func disableColors() {
+	reset = ""
+	bold = ""
+	dim = ""
+	red = ""
+	green = ""
+	yellow = ""
+	magenta = ""
+}
 
 // OutputMode controls how much the UI displays.
 type OutputMode int
