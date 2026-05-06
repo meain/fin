@@ -113,9 +113,54 @@ func main() {
 		}
 	}
 
+	modelExplicit := *model != ""
 	modelStr := *model
 	if modelStr == "" {
 		modelStr = config.Settings.DefaultModel
+	}
+
+	outMode := parseOutputMode(config.Settings.UI)
+	if *uiMode != "" {
+		outMode = parseOutputMode(*uiMode)
+	}
+
+	skills := DiscoverSkills(config)
+
+	args := flag.Args()
+
+	var pipedInput string
+	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
+		data, err := io.ReadAll(os.Stdin)
+		if err == nil && len(data) > 0 {
+			pipedInput = string(data)
+		}
+	}
+
+	// Resolve session first so we can inherit the model if needed.
+	var resumedSession *Session
+	var sw *SessionWriter
+	if *name != "" {
+		sess, err := LoadSessionByName(*name)
+		if err == nil {
+			resumedSession = sess
+		}
+	} else if *cont || *session != "" {
+		sess, err := loadSession()
+		if err != nil {
+			ui := NewUI(nil, outMode)
+			ui.Error(err.Error())
+			ui.Close()
+			os.Exit(1)
+		}
+		resumedSession = sess
+	} else if *match && pipedInput == "" && len(args) > 0 {
+		query := strings.Join(args, " ")
+		resumedSession = promptSessionMatch(query)
+	}
+
+	// Inherit model from resumed session unless explicitly overridden.
+	if resumedSession != nil && !modelExplicit && resumedSession.Model != "" {
+		modelStr = resumedSession.Model
 	}
 
 	providerName, modelName := resolveModel(modelStr, config)
@@ -135,58 +180,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	outMode := parseOutputMode(config.Settings.UI)
-	if *uiMode != "" {
-		outMode = parseOutputMode(*uiMode)
-	}
-
-	skills := DiscoverSkills(config)
-
 	ui := NewUI(nil, outMode)
 	defer ui.Close()
 	agent := NewAgent(&modelInjector{provider: p, model: modelName}, config, ui, skills)
 
-	args := flag.Args()
-
-	var pipedInput string
-	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
-		data, err := io.ReadAll(os.Stdin)
-		if err == nil && len(data) > 0 {
-			pipedInput = string(data)
+	if resumedSession != nil {
+		agent.SetMessages(resumedSession.Messages)
+		sw = SessionWriterForExisting(resumedSession)
+		label := resumedSession.ID
+		if resumedSession.Name != "" {
+			label = resumedSession.Name
 		}
+		ui.Info(fmt.Sprintf("resumed session %s (%s)", label, resumedSession.StartedAt.Format("2006-01-02 15:04")))
 	}
-
-	var sw *SessionWriter
-	if *name != "" {
-		sess, err := LoadSessionByName(*name)
-		if err == nil {
-			agent.SetMessages(sess.Messages)
-			sw = SessionWriterForExisting(sess)
-			ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.Name, sess.StartedAt.Format("2006-01-02 15:04")))
-		} else {
+	if sw == nil {
+		if *name != "" {
 			sw = NewSessionWriter(modelStr, *name)
 			ui.Info(fmt.Sprintf("new session [%s]", *name))
-		}
-	} else if *cont || *session != "" {
-		sess, err := loadSession()
-		if err != nil {
-			ui.Error(err.Error())
-			os.Exit(1)
-		}
-		agent.SetMessages(sess.Messages)
-		sw = SessionWriterForExisting(sess)
-		ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
-	} else if *match && pipedInput == "" && len(args) > 0 {
-		query := strings.Join(args, " ")
-		if sess := promptSessionMatch(query); sess != nil {
-			agent.SetMessages(sess.Messages)
-			sw = SessionWriterForExisting(sess)
-			ui.Info(fmt.Sprintf("resumed session %s (%s)", sess.ID, sess.StartedAt.Format("2006-01-02 15:04")))
 		} else {
 			sw = NewSessionWriter(modelStr, "")
 		}
-	} else {
-		sw = NewSessionWriter(modelStr, "")
 	}
 	agent.OnUpdate = func(msgs []t.Message) {
 		_ = sw.Save(msgs)
