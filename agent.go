@@ -19,12 +19,28 @@ import (
 )
 
 // Agent orchestrates the conversation loop between user, LLM, and tools.
+// UIWriter is the interface the agent uses to communicate with the UI layer.
+// All rendering decisions live behind this interface, so the implementation
+// can be swapped (terminal, web, JSON logger, etc.).
+type UIWriter interface {
+	StreamText(text string)
+	EndStream()
+	ToolCallProgress(name, argsSoFar string)
+	ToolStart(idx, total int, name string, args map[string]any)
+	ToolDone(idx int, name string, args map[string]any, result t.ToolResult, err error)
+	ToolOutput(idx, lines int)
+	ToolCallStart(name string, args map[string]any)
+	ToolApprovalPrompt(name string, args map[string]any) bool
+	Info(msg string)
+	Error(msg string)
+}
+
 type Agent struct {
 	provider provider.Provider
 	model    string // model name for tagging assistant messages
 	tools    []tool.Tool
 	config   *Config
-	ui       *UI
+	ui       UIWriter
 	skills   []*Skill
 	messages []t.Message
 	Usage    t.Usage // accumulated token usage across all turns
@@ -32,7 +48,7 @@ type Agent struct {
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, model string, config *Config, ui *UI, skills []*Skill) *Agent {
+func NewAgent(p provider.Provider, model string, config *Config, ui UIWriter, skills []*Skill) *Agent {
 	tools := buildTools(skills)
 	systemPrompt := buildSystemPrompt(config, skills)
 
@@ -191,7 +207,7 @@ func (a *Agent) run(ctx context.Context) error {
 		var wg sync.WaitGroup
 		for i, item := range items {
 			if item.err != nil {
-				a.ui.ToolDone(i, item.tc.Name, item.args, "", item.err)
+				a.ui.ToolDone(i, item.tc.Name, item.args, t.ToolResult{}, item.err)
 				continue
 			}
 			wg.Add(1)
@@ -205,7 +221,7 @@ func (a *Agent) run(ctx context.Context) error {
 				}
 				res, err := tl.Run(ctx, args)
 				results[i] = toolExecResult{result: res, err: err}
-				a.ui.ToolDone(i, name, args, res.Content, err)
+				a.ui.ToolDone(i, name, args, res, err)
 			}(i, item.tool, item.tc.Name, item.args)
 		}
 		wg.Wait()

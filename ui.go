@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
 
@@ -72,7 +73,7 @@ type UIEvent struct {
 	Text   string
 	Name   string
 	Args   map[string]any
-	Result string
+	Result t.ToolResult
 	Err    error
 	Index  int       // tool index in parallel batch
 	Total  int       // total tools in batch
@@ -84,7 +85,7 @@ type toolLineState struct {
 	name    string
 	args    map[string]any
 	running bool
-	result  string
+	result  t.ToolResult
 	err     error
 	start   time.Time
 	lines   int // streaming line count (updated during execution)
@@ -170,7 +171,7 @@ func (u *UI) ToolStart(idx, total int, name string, args map[string]any) {
 }
 
 // ToolDone marks a tool as completed and updates its status line.
-func (u *UI) ToolDone(idx int, name string, args map[string]any, result string, err error) {
+func (u *UI) ToolDone(idx int, name string, args map[string]any, result t.ToolResult, err error) {
 	u.send(UIEvent{Kind: uiToolDone, Index: idx, Name: name, Args: args, Result: result, Err: err})
 }
 
@@ -400,7 +401,7 @@ func (u *UI) updateToolLine(idx int) {
 	if tl.running && tl.lines > 0 {
 		resultInfo = fmt.Sprintf("(%d lines) ", tl.lines)
 	} else if !tl.running && tl.err == nil {
-		lines := strings.Count(tl.result, "\n")
+		lines := strings.Count(tl.result.Content, "\n")
 		if lines > 0 {
 			resultInfo = fmt.Sprintf("(%d lines) ", lines)
 		}
