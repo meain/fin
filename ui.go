@@ -58,8 +58,7 @@ func parseOutputMode(s string) OutputMode {
 type UIEventKind int
 
 const (
-	uiAssistantLabel UIEventKind = iota
-	uiStreamText
+	uiStreamText UIEventKind = iota
 	uiEndStream
 	uiToolProgress // streaming tool-call argument progress
 	uiToolStart    // tool about to execute (shows status line)
@@ -149,10 +148,6 @@ func (u *UI) sendSync(ev UIEvent) bool {
 }
 
 // --- Public API (sends events) ---
-
-func (u *UI) AssistantLabel() {
-	u.send(UIEvent{Kind: uiAssistantLabel})
-}
 
 func (u *UI) StreamText(text string) {
 	if u.mode == OutputSilent {
@@ -256,12 +251,6 @@ func (u *UI) hasRunningTools() bool {
 
 func (u *UI) handleEvent(ev UIEvent) {
 	switch ev.Kind {
-	case uiAssistantLabel:
-		if u.mode != OutputNormal {
-			return
-		}
-		u.write(fmt.Sprintf("\n%s%sfin>%s ", bold, magenta, reset))
-
 	case uiStreamText:
 		if u.mode == OutputQuiet {
 			fmt.Fprint(os.Stdout, ev.Text)

@@ -133,10 +133,6 @@ func (a *Agent) run(ctx context.Context) error {
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
-		if turn == 0 {
-			a.ui.AssistantLabel()
-		}
-
 		req := t.CompletionRequest{
 			Model:    "",
 			Messages: a.messages,
