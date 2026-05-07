@@ -37,20 +37,17 @@ func disableColors() {
 type OutputMode int
 
 const (
-	OutputNormal  OutputMode = iota // full output with colors
-	OutputMinimal                   // just tool names + streamed text
+	OutputDefault OutputMode = iota // tool names + streamed text + tool detail
 	OutputQuiet                     // only final response text (stdout)
 	OutputSilent                    // no output at all (for subagents)
 )
 
 func parseOutputMode(s string) OutputMode {
 	switch s {
-	case "minimal":
-		return OutputMinimal
 	case "quiet":
 		return OutputQuiet
 	default:
-		return OutputNormal
+		return OutputDefault
 	}
 }
 
@@ -263,9 +260,6 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 	case uiEndStream:
 		u.ensureNewline()
-		if u.mode == OutputNormal {
-			u.write("\n")
-		}
 
 	case uiToolProgress:
 		u.handleToolProgress(ev.Name, ev.Text)
@@ -286,7 +280,7 @@ func (u *UI) handleEvent(ev UIEvent) {
 		u.handleToolApproval(ev)
 
 	case uiInfo:
-		if u.mode != OutputNormal {
+		if u.mode != OutputDefault {
 			return
 		}
 		u.write(fmt.Sprintf("%s%s%s\n", dim, ev.Text, reset))
@@ -356,18 +350,10 @@ func (u *UI) handleToolStart(ev UIEvent) {
 	// Print the initial status line.
 	suffix := fmt.Sprintf(" %s…%s", dim, reset)
 	suffixVis := visibleLen(suffix)
-	prefix := "  "
-	if u.mode == OutputMinimal {
-		prefix = ""
-	}
-	maxLabel := getTermWidth() - len(prefix) - suffixVis
+	maxLabel := getTermWidth() - suffixVis
 	label := truncateVisible(toolLabel(ev.Name, ev.Args), maxLabel)
-	line := fmt.Sprintf("%s%s%s%s%s", prefix, bold, yellow, label, reset+suffix)
-	if u.mode == OutputMinimal {
-		fmt.Fprintf(stderr, "%s\n", line)
-	} else {
-		u.write(line + "\n")
-	}
+	line := fmt.Sprintf("%s%s%s%s", bold, yellow, label, reset+suffix)
+	u.write(line + "\n")
 }
 
 func (u *UI) handleToolDone(ev UIEvent) {
@@ -430,17 +416,12 @@ func (u *UI) updateToolLine(idx int) {
 		suffix = fmt.Sprintf(" %s%s%s%s", dim, resultInfo, elapsedStr, reset)
 	}
 
-	prefix := ""
-	if u.mode != OutputMinimal {
-		prefix = "  "
-	}
-
-	// Truncate label to fit: width - prefix - suffix_visible - 1 (space after label)
+	// Truncate label to fit: width - suffix_visible - 1 (space after label)
 	suffixVisible := visibleLen(suffix)
-	maxLabel := getTermWidth() - len(prefix) - suffixVisible - 1
+	maxLabel := getTermWidth() - suffixVisible - 1
 	label = truncateVisible(label, maxLabel)
 
-	fmt.Fprintf(stderr, "%s%s%s%s%s", prefix, bold, labelColor, label, reset+suffix)
+	fmt.Fprintf(stderr, "%s%s%s%s", bold, labelColor, label, reset+suffix)
 
 	if linesUp > 0 {
 		fmt.Fprintf(stderr, "\033[%dB\r", linesUp)
@@ -474,101 +455,7 @@ func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 	} else {
 		u.ensureNewline()
 	}
-	if u.mode == OutputMinimal {
-		u.renderMinimalToolCall(name, args)
-		return
-	}
-	u.write(fmt.Sprintf("\n  %s%s%s%s", bold, yellow, name, reset))
-	switch name {
-	case "shell":
-		if cmd, ok := args["command"].(string); ok {
-			u.write(fmt.Sprintf(" %s$ %s%s", dim, cmd, reset))
-		}
-	case "read":
-		if path, ok := args["path"].(string); ok {
-			u.write(fmt.Sprintf(" %s%s%s", dim, path, reset))
-		}
-	case "edit":
-		if path, ok := args["path"].(string); ok {
-			u.write(fmt.Sprintf(" %s%s%s", dim, path, reset))
-		}
-		u.write("\n")
-		if old, ok := args["old_string"].(string); ok {
-			for _, line := range strings.Split(old, "\n") {
-				u.write(fmt.Sprintf("  %s%s- %s%s\n", dim, red, line, reset))
-			}
-		}
-		if nw, ok := args["new_string"].(string); ok {
-			for _, line := range strings.Split(nw, "\n") {
-				u.write(fmt.Sprintf("  %s%s+ %s%s\n", dim, green, line, reset))
-			}
-		}
-		return
-	case "write":
-		if path, ok := args["path"].(string); ok {
-			u.write(fmt.Sprintf(" %s%s%s", dim, path, reset))
-		}
-		u.write("\n")
-		if content, ok := args["content"].(string); ok {
-			lines := strings.Split(content, "\n")
-			show := lines
-			if len(show) > 15 {
-				show = show[:15]
-			}
-			for _, line := range show {
-				u.write(fmt.Sprintf("  %s%s+ %s%s\n", dim, green, line, reset))
-			}
-			if len(lines) > 15 {
-				u.write(fmt.Sprintf("  %s… %d more lines%s\n", dim, len(lines)-15, reset))
-			}
-		}
-		return
-	case "subagent":
-		if task, ok := args["task"].(string); ok {
-			display := task
-			if len(display) > 60 {
-				display = display[:60] + "…"
-			}
-			u.write(fmt.Sprintf(" %s%s%s", dim, display, reset))
-		}
-	}
-	u.write("\n")
-}
-
-func (u *UI) renderMinimalToolCall(name string, args map[string]any) {
-	switch name {
-	case "shell":
-		cmd, _ := args["command"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s$ %s%s", yellow, name, reset, dim, cmd, reset)
-	case "read":
-		path, _ := args["path"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, path, reset)
-	case "write":
-		path, _ := args["path"].(string)
-		content, _ := args["content"].(string)
-		lines := strings.Count(content, "\n") + 1
-		fmt.Fprintf(stderr, "%s%s%s %s%s (%d lines)%s", yellow, name, reset, dim, path, lines, reset)
-	case "edit":
-		path, _ := args["path"].(string)
-		old, _ := args["old_string"].(string)
-		nw, _ := args["new_string"].(string)
-		oldLines := strings.Count(old, "\n") + 1
-		newLines := strings.Count(nw, "\n") + 1
-		fmt.Fprintf(stderr, "%s%s%s %s%s (-%d +%d lines)%s", yellow, name, reset, dim, path, oldLines, newLines, reset)
-	case "use_skill":
-		skill, _ := args["name"].(string)
-		fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, skill, reset)
-	case "subagent":
-		if task, ok := args["task"].(string); ok {
-			display := task
-			if len(display) > 60 {
-				display = display[:60] + "…"
-			}
-			fmt.Fprintf(stderr, "%s%s%s %s%s%s", yellow, name, reset, dim, display, reset)
-		}
-	default:
-		fmt.Fprintf(stderr, "%s%s%s", yellow, name, reset)
-	}
+	u.write(fmt.Sprintf("%s%s%s\n", yellow, toolLabel(name, args), reset))
 }
 
 // --- Approval prompt ---
@@ -576,14 +463,14 @@ func (u *UI) renderMinimalToolCall(name string, args map[string]any) {
 func (u *UI) handleToolApproval(ev UIEvent) {
 	var approved bool
 	if u.term != nil {
-		u.term.WriteString(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		u.term.WriteString(fmt.Sprintf("%s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
 		line, err := u.term.ReadLine("")
 		if err == nil {
 			line = strings.TrimSpace(strings.ToLower(line))
 			approved = line == "y" || line == "yes"
 		}
 	} else {
-		u.write(fmt.Sprintf("  %s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		u.write(fmt.Sprintf("%s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
 		var input string
 		fmt.Scanln(&input)
 		input = strings.TrimSpace(strings.ToLower(input))
@@ -705,6 +592,17 @@ func toolLabel(name string, args map[string]any) string {
 		}
 	case "read":
 		if path, ok := args["path"].(string); ok {
+			offset, hasOffset := args["offset"].(float64)
+			limit, hasLimit := args["limit"].(float64)
+			if hasOffset || hasLimit {
+				if hasOffset && hasLimit {
+					return fmt.Sprintf("%s%s %s%s (%d:%d)", name, reset, dim, path, int(offset), int(offset)+int(limit))
+				} else if hasOffset {
+					return fmt.Sprintf("%s%s %s%s (%d:)", name, reset, dim, path, int(offset))
+				} else {
+					return fmt.Sprintf("%s%s %s%s (:%d)", name, reset, dim, path, int(limit))
+				}
+			}
 			return name + reset + " " + dim + path
 		}
 	case "write":

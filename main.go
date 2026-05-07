@@ -29,7 +29,7 @@ func main() {
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
 	export := flag.String("export", "", "export format: json, html, message")
 	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
-	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet")
+	uiMode := flag.String("ui", "", "output mode: default, quiet")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	flag.Parse()
@@ -235,7 +235,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if outMode == OutputNormal {
+	if outMode == OutputDefault {
 		u := agent.Usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 {
 			usage := fmt.Sprintf("tokens: %d in, %d out", u.InputTokens, u.OutputTokens)

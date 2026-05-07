@@ -23,7 +23,7 @@ type Settings struct {
 	ProjectFile  string `toml:"project_file"`
 	MaxTurns     int    `toml:"max_turns"`
 	Yolo         bool   `toml:"yolo"`
-	UI           string `toml:"ui"` // "default", "minimal", "quiet"
+	UI           string `toml:"ui"` // "default", "quiet"
 }
 
 type ProviderConfig struct {

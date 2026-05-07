@@ -22,13 +22,13 @@ func TestReadTool_File(t *testing.T) {
 	}
 
 	// Verify line numbers are present
-	if !strings.Contains(result.Content, "1\tline one") {
+	if !strings.Contains(result.Content, "1│line one") {
 		t.Errorf("expected line 1 with content, got:\n%s", result.Content)
 	}
-	if !strings.Contains(result.Content, "2\tline two") {
+	if !strings.Contains(result.Content, "2│line two") {
 		t.Errorf("expected line 2 with content, got:\n%s", result.Content)
 	}
-	if !strings.Contains(result.Content, "3\tline three") {
+	if !strings.Contains(result.Content, "3│line three") {
 		t.Errorf("expected line 3 with content, got:\n%s", result.Content)
 	}
 }
@@ -51,17 +51,17 @@ func TestReadTool_OffsetLimit(t *testing.T) {
 	}
 
 	// Should contain lines 2 and 3 (b, c) with 1-based line numbers
-	if !strings.Contains(result.Content, "2\tb") {
+	if !strings.Contains(result.Content, "2│b") {
 		t.Errorf("expected line 2 (b), got:\n%s", result.Content)
 	}
-	if !strings.Contains(result.Content, "3\tc") {
+	if !strings.Contains(result.Content, "3│c") {
 		t.Errorf("expected line 3 (c), got:\n%s", result.Content)
 	}
 	// Should NOT contain line 1 or line 4
-	if strings.Contains(result.Content, "1\ta") {
+	if strings.Contains(result.Content, "1│a") {
 		t.Errorf("should not contain line 1, got:\n%s", result.Content)
 	}
-	if strings.Contains(result.Content, "4\td") {
+	if strings.Contains(result.Content, "4│d") {
 		t.Errorf("should not contain line 4, got:\n%s", result.Content)
 	}
 }
