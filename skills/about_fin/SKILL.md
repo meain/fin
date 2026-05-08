@@ -1,5 +1,5 @@
 ---
-name: about-fin
+name: about_fin
 description: Learn about fin itself — what it is, how it works, its architecture. Use when asked about fin.
 ---
 

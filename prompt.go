@@ -13,11 +13,6 @@ func buildSystemPrompt(config *Config, skills []*Skill) string {
 	var b strings.Builder
 	b.WriteString(baseSystemPrompt)
 
-	// Skill tool description (if skills are available)
-	if len(skills) > 0 {
-		b.WriteString("\n- use_skill: Activate a skill to load its full instructions or read a skill's resource files")
-	}
-
 	// Runtime context
 	cwd, _ := os.Getwd()
 	fmt.Fprintf(&b, "\n\nEnvironment:\n- Date: %s\n- OS: %s/%s\n- Working directory: %s",
