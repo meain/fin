@@ -377,6 +377,9 @@ func (u *UI) handleEvent(ev UIEvent) {
 		u.write(fmt.Sprintf("%s%serror: %s%s\n", bold, red, ev.Text, reset))
 
 	case uiSessionInfo:
+		if u.mode != OutputDebug {
+			return
+		}
 		if ev.Session != nil {
 			s := ev.Session
 			if s.Resumed {
