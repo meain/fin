@@ -22,8 +22,8 @@ type Settings struct {
 	DefaultModel string `toml:"default_model"`
 	ProjectFile  string `toml:"project_file"`
 	MaxTurns     int    `toml:"max_turns"`
-	Yolo         bool   `toml:"yolo"`
-	UI           string `toml:"ui"` // "default", "quiet"
+	AutoApprove  string `toml:"auto_approve"` // "all", "safe", "none"
+	UI           string `toml:"ui"`           // "default", "quiet"
 }
 
 type ProviderConfig struct {

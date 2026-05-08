@@ -28,7 +28,8 @@ func main() {
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
 	export := flag.String("export", "", "export format: json, html, message")
-	yolo := flag.Bool("yolo", false, "auto-approve all tool calls")
+	approve := flag.String("approve", "", "tool approval mode: all, safe, none")
+	yolo := flag.Bool("yolo", false, "alias for -approve all")
 	uiMode := flag.String("ui", "", "output mode: default, quiet")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
@@ -105,7 +106,15 @@ func main() {
 		return
 	}
 
-	if *yolo || config.Settings.Yolo {
+	approveMode := *approve
+	if *yolo {
+		approveMode = "all"
+	}
+	if approveMode == "" {
+		approveMode = config.Settings.AutoApprove
+	}
+	config.Settings.AutoApprove = approveMode
+	if approveMode == "all" {
 		for name := range config.Tools {
 			tc := config.Tools[name]
 			tc.Approval = "auto"

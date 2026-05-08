@@ -53,7 +53,8 @@ fin -all -sessions              # list all sessions
 fin -export json|html|message   # export session (uses -s/-n for specific, else last)
 fin -model provider/model       # override model
 fin -ui default|minimal|quiet   # output mode
-fin -yolo                       # auto-approve all tools
+fin -approve all                # auto-approve all tools (also: safe, none)
+fin -yolo                       # alias for -approve all
 fin -match "prompt"             # search recent sessions, offer to continue matching one
 ```
 
@@ -61,7 +62,7 @@ fin -match "prompt"             # search recent sessions, offer to continue matc
 
 TOML at `~/.config/fin/config.toml`:
 
-- `[settings]` — `default_model`, `project_file`, `max_turns`, `yolo`, `ui`
+- `[settings]` — `default_model`, `project_file`, `max_turns`, `auto_approve`, `ui`
 - `[model_aliases]` — short names mapping to `provider/model`
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`
 - `[tools.*]` — `approval` (auto/confirm/deny), `allow`/`deny` glob patterns for shell

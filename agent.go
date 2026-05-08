@@ -379,7 +379,26 @@ func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 	return tl, args, nil
 }
 
+// safeAutoApproveTools lists tools that -auto-approve safe will approve.
+var safeAutoApproveTools = map[string]bool{
+	"read":      true,
+	"use_skill": true,
+	"compact":   true,
+	"subagent":  true,
+}
+
 func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
+	if a.config.Settings.AutoApprove == "none" {
+		return false
+	}
+
+	// Safe mode: auto-approve only read-like tools
+	if a.config.Settings.AutoApprove == "safe" {
+		if safeAutoApproveTools[toolName] {
+			return true
+		}
+	}
+
 	tc, ok := a.config.Tools[toolName]
 	if !ok {
 		return false
@@ -498,12 +517,31 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 		childModel = providerName + "/" + modelName
 	}
 
+	// In safe mode, subagents only get read auto-approved.
+	childConfig := *a.config
+	if childConfig.Settings.AutoApprove == "safe" {
+		childConfig.Tools = make(map[string]ToolConfig, len(a.config.Tools))
+		for k, v := range a.config.Tools {
+			childConfig.Tools[k] = v
+		}
+		for name := range childConfig.Tools {
+			tc := childConfig.Tools[name]
+			if name == "read" || name == "compact" {
+				tc.Approval = "auto"
+			} else if tc.Approval == "auto" && name != "use_skill" {
+				tc.Approval = "confirm"
+			}
+			childConfig.Tools[name] = tc
+		}
+		childConfig.Settings.AutoApprove = ""
+	}
+
 	childUI := NewUI(nil, OutputSilent)
 	child := &Agent{
 		provider: p,
 		model:    childModel,
 		tools:    childTools,
-		config:   a.config,
+		config:   &childConfig,
 		ui:       childUI,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},
