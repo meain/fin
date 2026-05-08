@@ -52,7 +52,7 @@ fin -sessions                   # list last 10 sessions
 fin -all -sessions              # list all sessions
 fin -export json|html|message   # export session (uses -s/-n for specific, else last)
 fin -model provider/model       # override model
-fin -ui default|minimal|quiet   # output mode
+fin -ui default|debug|quiet     # output mode
 fin -approve all                # auto-approve all tools (also: safe, none)
 fin -yolo                       # alias for -approve all
 fin -match "prompt"             # search recent sessions, offer to continue matching one

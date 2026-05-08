@@ -244,7 +244,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if outMode == OutputDefault {
+	if outMode == OutputDebug {
 		u := agent.Usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 {
 			usage := fmt.Sprintf("tokens: %d in, %d out", u.InputTokens, u.OutputTokens)

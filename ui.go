@@ -39,6 +39,7 @@ type OutputMode int
 
 const (
 	OutputDefault OutputMode = iota // tool names + streamed text + tool detail
+	OutputDebug                     // default + token usage
 	OutputQuiet                     // only final response text (stdout)
 	OutputSilent                    // no output at all (for subagents)
 )
@@ -47,6 +48,8 @@ func parseOutputMode(s string) OutputMode {
 	switch s {
 	case "quiet":
 		return OutputQuiet
+	case "debug":
+		return OutputDebug
 	default:
 		return OutputDefault
 	}
@@ -281,7 +284,7 @@ func (u *UI) handleEvent(ev UIEvent) {
 		u.handleToolApproval(ev)
 
 	case uiInfo:
-		if u.mode != OutputDefault {
+		if u.mode != OutputDefault && u.mode != OutputDebug {
 			return
 		}
 		u.write(fmt.Sprintf("%s%s%s\n", dim, ev.Text, reset))
