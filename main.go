@@ -114,13 +114,7 @@ func main() {
 		approveMode = config.Settings.AutoApprove
 	}
 	config.Settings.AutoApprove = approveMode
-	if approveMode == "all" {
-		for name := range config.Tools {
-			tc := config.Tools[name]
-			tc.Approval = "auto"
-			config.Tools[name] = tc
-		}
-	}
+	approval := buildToolApproval(approveMode, config.Tools)
 
 	modelExplicit := *model != ""
 	modelStr := *model
@@ -192,7 +186,7 @@ func main() {
 
 	ui := NewUI(nil, outMode)
 	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, ui, skills)
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills)
 
 	if resumedSession != nil {
 		agent.SetMessages(resumedSession.Messages)

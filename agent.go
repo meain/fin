@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	mathrand "math/rand/v2"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +42,7 @@ type Agent struct {
 	model    string // model name for tagging assistant messages
 	tools    []tool.Tool
 	config   *Config
+	approval *toolApproval
 	ui       UIWriter
 	skills   []*Skill
 	messages []t.Message
@@ -51,7 +51,7 @@ type Agent struct {
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, model string, config *Config, ui UIWriter, skills []*Skill) *Agent {
+func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill) *Agent {
 	tools := buildTools(skills)
 	systemPrompt := buildSystemPrompt(config, skills)
 
@@ -60,6 +60,7 @@ func NewAgent(p provider.Provider, model string, config *Config, ui UIWriter, sk
 		model:    model,
 		tools:    tools,
 		config:   config,
+		approval: approval,
 		ui:       ui,
 		skills:   skills,
 		messages: []t.Message{
@@ -390,7 +391,7 @@ func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 		args = map[string]any{}
 	}
 
-	if !a.shouldAutoApprove(tc.Name, args) {
+	if !a.approval.autoApprove(tc.Name, args) {
 		a.ui.ToolCallStart(tc.Name, args)
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
 			return nil, nil, fmt.Errorf("tool call denied by user")
@@ -398,56 +399,6 @@ func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 	}
 
 	return tl, args, nil
-}
-
-// safeAutoApproveTools lists tools that -auto-approve safe will approve.
-var safeAutoApproveTools = map[string]bool{
-	"read":      true,
-	"use_skill": true,
-	"compact":   true,
-	"subagent":  true,
-}
-
-func (a *Agent) shouldAutoApprove(toolName string, args map[string]any) bool {
-	if a.config.Settings.AutoApprove == "none" {
-		return false
-	}
-
-	// Safe mode: auto-approve only read-like tools
-	if a.config.Settings.AutoApprove == "safe" {
-		if safeAutoApproveTools[toolName] {
-			return true
-		}
-	}
-
-	tc, ok := a.config.Tools[toolName]
-	if !ok {
-		return false
-	}
-
-	if tc.Approval == "auto" {
-		return true
-	}
-	if tc.Approval == "deny" {
-		return false
-	}
-
-	if toolName == "shell" {
-		if cmd, ok := args["command"].(string); ok {
-			for _, pattern := range tc.Deny {
-				if matched, _ := filepath.Match(pattern, cmd); matched {
-					return false
-				}
-			}
-			for _, pattern := range tc.Allow {
-				if matched, _ := filepath.Match(pattern, cmd); matched {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
 }
 
 const (
@@ -538,31 +489,13 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 		childModel = providerName + "/" + modelName
 	}
 
-	// In safe mode, subagents only get read auto-approved.
-	childConfig := *a.config
-	if childConfig.Settings.AutoApprove == "safe" {
-		childConfig.Tools = make(map[string]ToolConfig, len(a.config.Tools))
-		for k, v := range a.config.Tools {
-			childConfig.Tools[k] = v
-		}
-		for name := range childConfig.Tools {
-			tc := childConfig.Tools[name]
-			if name == "read" || name == "compact" {
-				tc.Approval = "auto"
-			} else if tc.Approval == "auto" && name != "use_skill" {
-				tc.Approval = "confirm"
-			}
-			childConfig.Tools[name] = tc
-		}
-		childConfig.Settings.AutoApprove = ""
-	}
-
 	childUI := NewUI(nil, OutputSilent)
 	child := &Agent{
 		provider: p,
 		model:    childModel,
 		tools:    childTools,
-		config:   &childConfig,
+		config:   a.config,
+		approval: a.approval.forSubagent(),
 		ui:       childUI,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},
