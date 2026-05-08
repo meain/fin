@@ -454,8 +454,7 @@ func retryDelay(attempt int) time.Duration {
 // runSubagent spawns an isolated child agent to handle a task.
 // The child gets the same tools (minus subagent) and config, but a fresh conversation.
 func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResult, error) {
-	// Build tools without SubagentTool to prevent nesting.
-	childTools := tool.BuiltinTools()
+	childTools := tool.SubagentTools()
 	entries := loadBuiltinSkills()
 	for _, s := range a.skills {
 		entries = append(entries, tool.SkillEntry{

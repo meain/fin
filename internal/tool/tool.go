@@ -47,3 +47,13 @@ func BuiltinTools() []Tool {
 		&CompactTool{},
 	}
 }
+
+// SubagentTools returns the tool set available to subagents.
+func SubagentTools() []Tool {
+	return []Tool{
+		&ReadTool{},
+		&WriteTool{},
+		&EditTool{},
+		&ShellTool{},
+	}
+}
