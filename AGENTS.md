@@ -38,6 +38,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 - Piped stdin is detected and prepended to the prompt
 - Rate limits (429) and server errors (5xx) retried with exponential backoff + jitter (max 3)
 - All terminal output must go through the UI layer (`ui.go`) — never `fmt.Fprintf(os.Stderr, ...)` directly
+- Never send pre-formatted complex data to the UI — pass structured types (e.g. `DebugData`, `RetryData`, `SessionInfoData`) and let the UI layer render. The UI must be replaceable (web, audio, etc.) so callers must not make formatting decisions. Simple static strings for `Info`/`Error` are fine.
 - ANSI escape codes directly — no color/TUI libraries
 - System prompt and builtin skills are embedded markdown files
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -21,6 +22,7 @@ var (
 	green   = "\033[32m"
 	yellow  = "\033[33m"
 	magenta = "\033[35m"
+	dimFg   = "\033[38;5;243m" // muted gray for debug lines
 )
 
 // disableColors clears all ANSI escape code variables.
@@ -32,6 +34,7 @@ func disableColors() {
 	green = ""
 	yellow = ""
 	magenta = ""
+	dimFg = ""
 }
 
 // OutputMode controls how much the UI displays.
@@ -68,7 +71,70 @@ const (
 	uiToolOutput   // streaming output line count update
 	uiInfo
 	uiError
+	uiSessionInfo // session resumed/created (shown in default + debug)
+	uiRetry       // retry attempt (shown in default + debug)
+	uiDebug // only shown in debug mode
 )
+
+// DebugEvent is implemented by all structured debug payloads.
+type DebugEvent interface {
+	debugEvent()
+}
+
+type DebugStartup struct {
+	Model       string
+	Skills      []string
+	SessionID   string
+	PromptChars int
+}
+
+type DebugTurnStart struct {
+	Turn     int
+	MaxTurns int
+	Messages int
+}
+
+type DebugTurnDone struct {
+	Usage   *t.Usage
+	TTFT    time.Duration
+	Elapsed time.Duration
+}
+
+type DebugToolArgs struct {
+	ToolName string
+	ToolArgs map[string]any
+}
+
+type DebugMessageCount struct {
+	Messages int
+}
+
+type DebugSummary struct {
+	Usage    *t.Usage
+	Messages int
+}
+
+func (DebugStartup) debugEvent()      {}
+func (DebugTurnStart) debugEvent()    {}
+func (DebugTurnDone) debugEvent()     {}
+func (DebugToolArgs) debugEvent()     {}
+func (DebugMessageCount) debugEvent() {}
+func (DebugSummary) debugEvent()      {}
+
+// SessionInfoData carries session status for the UI to render.
+type SessionInfoData struct {
+	Resumed   bool
+	Label     string    // session ID or name
+	StartedAt time.Time // only relevant for resumed sessions
+}
+
+// RetryData carries structured retry information for the UI to render.
+type RetryData struct {
+	Attempt    int
+	MaxRetries int
+	Delay      time.Duration
+	Err        error
+}
 
 // UIEvent is a message sent to the UI goroutine.
 type UIEvent struct {
@@ -78,9 +144,12 @@ type UIEvent struct {
 	Args   map[string]any
 	Result t.ToolResult
 	Err    error
-	Index  int       // tool index in parallel batch
-	Total  int       // total tools in batch
-	Reply  chan bool  // for approval response
+	Index  int        // tool index in parallel batch
+	Total  int        // total tools in batch
+	Reply  chan bool   // for approval response
+	Session *SessionInfoData // structured session info (uiSessionInfo only)
+	Retry   *RetryData      // structured retry payload (uiRetry only)
+	Debug   DebugEvent      // structured debug payload (uiDebug only)
 }
 
 // toolLineState tracks one tool in a parallel batch.
@@ -205,6 +274,21 @@ func (u *UI) Error(msg string) {
 	u.send(UIEvent{Kind: uiError, Text: msg})
 }
 
+func (u *UI) SessionInfo(data SessionInfoData) {
+	u.send(UIEvent{Kind: uiSessionInfo, Session: &data})
+}
+
+func (u *UI) Retry(data RetryData) {
+	u.send(UIEvent{Kind: uiRetry, Retry: &data})
+}
+
+func (u *UI) Debug(ev DebugEvent) {
+	if u.mode != OutputDebug {
+		return
+	}
+	u.send(UIEvent{Kind: uiDebug, Debug: ev})
+}
+
 // --- Event loop ---
 
 func (u *UI) run() {
@@ -291,7 +375,88 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 	case uiError:
 		u.write(fmt.Sprintf("%s%serror: %s%s\n", bold, red, ev.Text, reset))
+
+	case uiSessionInfo:
+		if ev.Session != nil {
+			s := ev.Session
+			if s.Resumed {
+				u.write(fmt.Sprintf("%sresumed session %s (%s)%s\n",
+					dim, s.Label, s.StartedAt.Format("2006-01-02 15:04"), reset))
+			} else {
+				u.write(fmt.Sprintf("%snew session [%s]%s\n", dim, s.Label, reset))
+			}
+		}
+
+	case uiRetry:
+		if ev.Retry != nil {
+			r := ev.Retry
+			u.write(fmt.Sprintf("%s%sretrying in %s (attempt %d/%d: %s)%s\n",
+				bold, yellow, formatElapsed(r.Delay), r.Attempt, r.MaxRetries, r.Err, reset))
+		}
+
+	case uiDebug:
+		u.renderDebug(ev.Debug)
 	}
+}
+
+// --- Debug rendering ---
+
+func (u *UI) renderDebug(ev DebugEvent) {
+	if ev == nil {
+		return
+	}
+	switch d := ev.(type) {
+	case DebugStartup:
+		parts := []string{d.Model}
+		sid := d.SessionID
+		if len(sid) > 8 {
+			sid = sid[:8]
+		}
+		parts = append(parts, sid)
+		parts = append(parts, fmt.Sprintf("%d skills", len(d.Skills)))
+		if d.PromptChars > 0 {
+			parts = append(parts, fmt.Sprintf("%d char prompt", d.PromptChars))
+		}
+		u.debugLine(strings.Join(parts, " | "))
+	case DebugTurnStart:
+		u.debugLine(fmt.Sprintf("turn %d/%d | %d messages", d.Turn, d.MaxTurns, d.Messages))
+	case DebugTurnDone:
+		s := formatUsage(d.Usage)
+		if d.TTFT > time.Millisecond {
+			s += fmt.Sprintf(" | ttft: %s", formatElapsed(d.TTFT))
+		}
+		if d.Elapsed > 0 {
+			s += fmt.Sprintf(" | %s", formatElapsed(d.Elapsed))
+		}
+		if s != "" {
+			u.debugLine(s)
+		}
+	case DebugToolArgs:
+		argsJSON, _ := json.Marshal(d.ToolArgs)
+		u.debugLine(fmt.Sprintf("  %s %s", d.ToolName, string(argsJSON)))
+	case DebugMessageCount:
+		u.debugLine(fmt.Sprintf("%d messages", d.Messages))
+	case DebugSummary:
+		s := "total: " + formatUsage(d.Usage)
+		s += fmt.Sprintf(" | %d messages", d.Messages)
+		u.debugLine(s)
+	}
+}
+
+func formatUsage(u *t.Usage) string {
+	if u == nil {
+		return ""
+	}
+	totalIn := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	s := fmt.Sprintf("%d in, %d out", totalIn, u.OutputTokens)
+	if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
+		hitPct := 0.0
+		if totalIn > 0 {
+			hitPct = float64(u.CacheReadInputTokens) / float64(totalIn) * 100
+		}
+		s += fmt.Sprintf(" | cache: %.0f%%", hitPct)
+	}
+	return s
 }
 
 // --- Tool progress (streaming args) ---
@@ -494,10 +659,21 @@ func (u *UI) write(s string) {
 }
 
 func (u *UI) ensureNewline() {
+	if u.hasProgress {
+		fmt.Fprint(stderr, "\033[2K\r")
+		u.hasProgress = false
+		u.lastProgressLines = 0
+	}
 	if u.wroteText {
 		u.write("\n")
 		u.wroteText = false
 	}
+}
+
+// debugLine writes a debug line with a │ prefix to distinguish from tool output.
+func (u *UI) debugLine(text string) {
+	u.ensureNewline()
+	u.write(fmt.Sprintf("%s│ %s%s\n", dimFg, text, reset))
 }
 
 func getTermWidth() int {

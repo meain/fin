@@ -33,6 +33,9 @@ type UIWriter interface {
 	ToolApprovalPrompt(name string, args map[string]any) bool
 	Info(msg string)
 	Error(msg string)
+	SessionInfo(data SessionInfoData)
+	Retry(data RetryData)
+	Debug(ev DebugEvent)
 }
 
 type Agent struct {
@@ -149,19 +152,23 @@ func (a *Agent) run(ctx context.Context) error {
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
+		a.ui.Debug(DebugTurnStart{Turn: turn + 1, MaxTurns: maxTurns, Messages: len(a.messages)})
+
 		req := t.CompletionRequest{
 			Model:    "",
 			Messages: a.messages,
 			Tools:    tool.Defs(a.tools),
 		}
 
+		turnStart := time.Now()
 		stream, err := a.streamWithRetry(ctx, req)
 		if err != nil {
 			a.ui.EndStream()
 			return err
 		}
 
-		assistantMsg, err := a.consumeStream(stream)
+		streamStart := time.Now()
+		assistantMsg, ttft, err := a.consumeStream(stream, streamStart)
 		stream.Close()
 		if err != nil {
 			a.ui.EndStream()
@@ -171,6 +178,8 @@ func (a *Agent) run(ctx context.Context) error {
 		a.ui.EndStream()
 		a.messages = append(a.messages, assistantMsg)
 		a.save()
+
+		a.ui.Debug(DebugTurnDone{Usage: assistantMsg.Usage, TTFT: ttft, Elapsed: time.Since(turnStart)})
 
 		if len(assistantMsg.ToolCalls) == 0 {
 			return nil
@@ -187,6 +196,13 @@ func (a *Agent) run(ctx context.Context) error {
 		for i, tc := range assistantMsg.ToolCalls {
 			tl, args, err := a.approveTool(tc)
 			items[i] = approvedTool{tc: tc, tool: tl, args: args, err: err}
+		}
+
+		// Debug: tool call args
+		for _, item := range items {
+			if item.err == nil {
+				a.ui.Debug(DebugToolArgs{ToolName: item.tc.Name, ToolArgs: item.args})
+			}
 		}
 
 		// Phase 2: register tools with UI, then execute in parallel
@@ -281,10 +297,11 @@ func (a *Agent) save() {
 	}
 }
 
-func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
+func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (t.Message, time.Duration, error) {
 	msg := t.Message{Role: t.RoleAssistant, Model: a.model, Timestamp: time.Now()}
 	var contentBuf strings.Builder
 	var msgUsage t.Usage
+	var ttft time.Duration
 
 	toolCalls := map[int]*t.ToolCall{}
 
@@ -294,7 +311,11 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 			if err == io.EOF {
 				break
 			}
-			return msg, err
+			return msg, ttft, err
+		}
+
+		if ttft == 0 && (delta.Content != "" || len(delta.ToolCalls) > 0) {
+			ttft = time.Since(streamStart)
 		}
 
 		if delta.Usage != nil {
@@ -350,7 +371,7 @@ func (a *Agent) consumeStream(stream provider.Stream) (t.Message, error) {
 		}
 	}
 
-	return msg, nil
+	return msg, ttft, nil
 }
 
 func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
@@ -453,7 +474,7 @@ func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (p
 		}
 
 		delay := retryDelay(attempt)
-		a.ui.Error(fmt.Sprintf("retrying in %s (%s)", delay.Round(time.Millisecond), err))
+		a.ui.Retry(RetryData{Attempt: attempt + 1, MaxRetries: maxRetries, Delay: delay, Err: err})
 
 		select {
 		case <-ctx.Done():

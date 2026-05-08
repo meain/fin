@@ -201,12 +201,12 @@ func main() {
 		if resumedSession.Name != "" {
 			label = resumedSession.Name
 		}
-		ui.Info(fmt.Sprintf("resumed session %s (%s)", label, resumedSession.StartedAt.Format("2006-01-02 15:04")))
+		ui.SessionInfo(SessionInfoData{Resumed: true, Label: label, StartedAt: resumedSession.StartedAt})
 	}
 	if sw == nil {
 		if *name != "" {
 			sw = NewSessionWriter(fullModel, *name)
-			ui.Info(fmt.Sprintf("new session [%s]", *name))
+			ui.SessionInfo(SessionInfoData{Label: *name})
 		} else {
 			sw = NewSessionWriter(fullModel, "")
 		}
@@ -218,6 +218,21 @@ func main() {
 		prevID := sw.id
 		sw = NewSessionWriter(fullModel, "")
 		sw.previousSession = prevID
+	}
+
+	// Startup debug info
+	{
+		d := DebugStartup{Model: fullModel, SessionID: sw.id}
+		if len(skills) > 0 {
+			d.Skills = make([]string, len(skills))
+			for i, s := range skills {
+				d.Skills[i] = s.Name
+			}
+		}
+		if msgs := agent.Messages(); len(msgs) > 0 {
+			d.PromptChars = len(msgs[0].Content)
+		}
+		ui.Debug(d)
 	}
 
 	if len(args) == 0 && pipedInput == "" {
@@ -247,11 +262,13 @@ func main() {
 	if outMode == OutputDebug {
 		u := agent.Usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 {
-			usage := fmt.Sprintf("tokens: %d in, %d out", u.InputTokens, u.OutputTokens)
-			if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
-				usage += fmt.Sprintf(" (cache: %d read, %d write)", u.CacheReadInputTokens, u.CacheCreationInputTokens)
+			msgCount := 0
+			for _, m := range agent.Messages() {
+				if m.Role != t.RoleSystem {
+					msgCount++
+				}
 			}
-			fmt.Fprintf(os.Stderr, "%s%s%s\n", dim, usage, reset)
+			ui.Debug(DebugSummary{Usage: &u, Messages: msgCount})
 		}
 	}
 }
