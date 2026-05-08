@@ -104,7 +104,7 @@ func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *Config) *Agent {
 		provider: fp,
 		tools:    tools,
 		config:   cfg,
-		approval: buildToolApproval(cfg.Settings.AutoApprove, cfg.Tools),
+		approval: buildToolApproval(cfg.Settings.Approve, cfg.Tools),
 		ui:       ui,
 		messages: []tp.Message{{Role: tp.RoleSystem, Content: "test"}},
 	}

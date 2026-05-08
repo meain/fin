@@ -152,9 +152,10 @@ func TestLoadConfig_TempFile(t *testing.T) {
 
 	content := `
 [settings]
-default_model = "openai/gpt-4o"
+model = "openai/gpt-4o"
 project_file = "AGENTS.md"
 max_turns = 20
+approve = "all"
 
 [model_aliases]
 fast = "openai/gpt-4o-mini"
@@ -176,10 +177,13 @@ approval = "auto"
 	}
 
 	if cfg.Settings.DefaultModel != "openai/gpt-4o" {
-		t.Errorf("expected default_model %q, got %q", "openai/gpt-4o", cfg.Settings.DefaultModel)
+		t.Errorf("expected model %q, got %q", "openai/gpt-4o", cfg.Settings.DefaultModel)
 	}
 	if cfg.Settings.MaxTurns != 20 {
 		t.Errorf("expected max_turns 20, got %d", cfg.Settings.MaxTurns)
+	}
+	if cfg.Settings.Approve != "all" {
+		t.Errorf("expected approve %q, got %q", "all", cfg.Settings.Approve)
 	}
 	if alias, ok := cfg.ModelAliases["fast"]; !ok || alias != "openai/gpt-4o-mini" {
 		t.Errorf("expected alias fast=openai/gpt-4o-mini, got %q", alias)

@@ -19,11 +19,11 @@ type Config struct {
 }
 
 type Settings struct {
-	DefaultModel string `toml:"default_model"`
+	DefaultModel string `toml:"model"`
 	ProjectFile  string `toml:"project_file"`
 	MaxTurns     int    `toml:"max_turns"`
-	AutoApprove  string `toml:"auto_approve"` // "all", "safe", "none"
-	UI           string `toml:"ui"`           // "default", "quiet"
+	Approve      string `toml:"approve"` // "all", "safe", "none"
+	UI           string `toml:"ui"`      // "default", "quiet"
 }
 
 type ProviderConfig struct {

@@ -111,9 +111,9 @@ func main() {
 		approveMode = "all"
 	}
 	if approveMode == "" {
-		approveMode = config.Settings.AutoApprove
+		approveMode = config.Settings.Approve
 	}
-	config.Settings.AutoApprove = approveMode
+	config.Settings.Approve = approveMode
 	approval := buildToolApproval(approveMode, config.Tools)
 
 	modelExplicit := *model != ""
