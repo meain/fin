@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -180,5 +182,235 @@ func TestLastMessageTime_FallsBackToStartedAt(t *testing.T) {
 	result := lastMessageTime(sess)
 	if !result.Equal(startedAt) {
 		t.Errorf("expected StartedAt %v, got %v", startedAt, result)
+	}
+}
+
+func TestParseSince_Hours(t *testing.T) {
+	before := time.Now()
+	cutoff, err := parseSince("2h")
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	low := before.Add(-2*time.Hour - time.Second)
+	high := after.Add(-2*time.Hour + time.Second)
+	if cutoff.Before(low) || cutoff.After(high) {
+		t.Errorf("cutoff %v not within expected range for 2h", cutoff)
+	}
+}
+
+func TestParseSince_Days(t *testing.T) {
+	before := time.Now()
+	cutoff, err := parseSince("3d")
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := 3 * 24 * time.Hour
+	low := before.Add(-expected - time.Second)
+	high := after.Add(-expected + time.Second)
+	if cutoff.Before(low) || cutoff.After(high) {
+		t.Errorf("cutoff %v not within expected range for 3d", cutoff)
+	}
+}
+
+func TestParseSince_Weeks(t *testing.T) {
+	before := time.Now()
+	cutoff, err := parseSince("2w")
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := 2 * 7 * 24 * time.Hour
+	low := before.Add(-expected - time.Second)
+	high := after.Add(-expected + time.Second)
+	if cutoff.Before(low) || cutoff.After(high) {
+		t.Errorf("cutoff %v not within expected range for 2w", cutoff)
+	}
+}
+
+func TestParseSince_Minutes(t *testing.T) {
+	cutoff, err := parseSince("30m")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if time.Since(cutoff) < 29*time.Minute || time.Since(cutoff) > 31*time.Minute {
+		t.Errorf("cutoff %v not ~30 minutes ago", cutoff)
+	}
+}
+
+func TestParseSince_InvalidSuffix(t *testing.T) {
+	_, err := parseSince("foo")
+	if err == nil {
+		t.Error("expected error for invalid duration")
+	}
+}
+
+func TestParseSince_InvalidNumber(t *testing.T) {
+	for _, s := range []string{"xd", "yw", "zd"} {
+		_, err := parseSince(s)
+		if err == nil {
+			t.Errorf("expected error for %q", s)
+		}
+	}
+}
+
+func TestFilterSessionsSince_ZeroCutoff(t *testing.T) {
+	sessions := []Session{
+		{ID: "a", StartedAt: time.Now().Add(-48 * time.Hour)},
+		{ID: "b", StartedAt: time.Now().Add(-1 * time.Hour)},
+	}
+	result := filterSessionsSince(sessions, time.Time{})
+	if len(result) != 2 {
+		t.Errorf("zero cutoff should return all sessions, got %d", len(result))
+	}
+}
+
+func TestFilterSessionsSince_ExcludesOld(t *testing.T) {
+	now := time.Now()
+	sessions := []Session{
+		{
+			ID:        "old",
+			StartedAt: now.Add(-72 * time.Hour),
+			Messages:  []t2.Message{{Role: t2.RoleUser, Timestamp: now.Add(-72 * time.Hour)}},
+		},
+		{
+			ID:        "recent",
+			StartedAt: now.Add(-1 * time.Hour),
+			Messages:  []t2.Message{{Role: t2.RoleUser, Timestamp: now.Add(-1 * time.Hour)}},
+		},
+	}
+	cutoff := now.Add(-24 * time.Hour)
+	result := filterSessionsSince(sessions, cutoff)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(result))
+	}
+	if result[0].ID != "recent" {
+		t.Errorf("expected recent session, got %q", result[0].ID)
+	}
+}
+
+func TestFilterSessionsSince_AllRecent(t *testing.T) {
+	now := time.Now()
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	sessions := []Session{
+		{ID: "a", Messages: []t2.Message{{Timestamp: now.Add(-1 * time.Hour)}}},
+		{ID: "b", Messages: []t2.Message{{Timestamp: now.Add(-2 * time.Hour)}}},
+		{ID: "c", Messages: []t2.Message{{Timestamp: now.Add(-3 * time.Hour)}}},
+	}
+	result := filterSessionsSince(sessions, cutoff)
+	if len(result) != 3 {
+		t.Errorf("expected 3 sessions, got %d", len(result))
+	}
+}
+
+func TestFilterSessionsSince_AllOld(t *testing.T) {
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Hour)
+	sessions := []Session{
+		{ID: "a", Messages: []t2.Message{{Timestamp: now.Add(-48 * time.Hour)}}},
+		{ID: "b", Messages: []t2.Message{{Timestamp: now.Add(-72 * time.Hour)}}},
+	}
+	result := filterSessionsSince(sessions, cutoff)
+	if len(result) != 0 {
+		t.Errorf("expected 0 sessions, got %d", len(result))
+	}
+}
+
+// writeTestSession saves a minimal session JSON to dir for use in ListSessions tests.
+func writeTestSession(t *testing.T, dir string, id string, age time.Duration, msgCount int) {
+	t.Helper()
+	now := time.Now()
+	msgs := make([]t2.Message, msgCount)
+	for i := range msgs {
+		msgs[i] = t2.Message{Role: t2.RoleUser, Content: "test", Timestamp: now.Add(-age)}
+	}
+	sess := Session{
+		ID:        id,
+		Title:     "test session " + id,
+		Model:     "test/model",
+		StartedAt: now.Add(-age),
+		Messages:  msgs,
+	}
+	data, _ := json.MarshalIndent(sess, "", "  ")
+	filename := now.Add(-age).Format("20060102-150405") + "_" + id + ".json"
+	if err := os.WriteFile(filepath.Join(dir, filename), data, 0644); err != nil {
+		t.Fatalf("writeTestSession: %v", err)
+	}
+}
+
+func TestListSessions_JSONOutput(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSession(t, sessDir, "aaaa1111-0000-0000-0000-000000000000", time.Hour, 2)
+	writeTestSession(t, sessDir, "bbbb2222-0000-0000-0000-000000000000", 2*time.Hour, 3)
+
+	t.Setenv("HOME", home)
+
+	// Capture stdout — in test env os.Stdout is not a terminal so JSON path runs.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	ListSessions(-1, time.Time{})
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	var summaries []SessionSummary
+	if err := json.Unmarshal(buf.Bytes(), &summaries); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if len(summaries) != 2 {
+		t.Errorf("expected 2 summaries, got %d", len(summaries))
+	}
+	for _, s := range summaries {
+		if s.ID == "" || s.Model == "" || s.MessageCount == 0 {
+			t.Errorf("summary missing fields: %+v", s)
+		}
+	}
+}
+
+func TestListSessions_SinceFiltersJSON(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSession(t, sessDir, "recent11-0000-0000-0000-000000000000", time.Hour, 1)
+	writeTestSession(t, sessDir, "old11111-0000-0000-0000-000000000000", 72*time.Hour, 1)
+
+	t.Setenv("HOME", home)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	since := time.Now().Add(-24 * time.Hour)
+	ListSessions(-1, since)
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	var summaries []SessionSummary
+	if err := json.Unmarshal(buf.Bytes(), &summaries); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if len(summaries) != 1 {
+		t.Errorf("expected 1 summary (recent only), got %d", len(summaries))
+	}
+	if len(summaries) > 0 && summaries[0].ID != "recent11-0000-0000-0000-000000000000" {
+		t.Errorf("expected recent session, got %q", summaries[0].ID)
 	}
 }

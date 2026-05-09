@@ -254,6 +254,21 @@ func parseSince(s string) (time.Time, error) {
 	return time.Now().Add(-d), nil
 }
 
+// filterSessionsSince returns sessions whose last activity is after the cutoff.
+// A zero cutoff returns the slice unchanged.
+func filterSessionsSince(sessions []Session, since time.Time) []Session {
+	if since.IsZero() {
+		return sessions
+	}
+	var filtered []Session
+	for _, s := range sessions {
+		if lastMessageTime(s).After(since) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
 // ListSessions prints saved sessions. limit=-1 for all. since is zero to skip filtering.
 // Outputs JSON when stdout is not a terminal.
 func ListSessions(limit int, since time.Time) {
@@ -263,18 +278,10 @@ func ListSessions(limit int, since time.Time) {
 		return
 	}
 
-	if !since.IsZero() {
-		filtered := sessions[:0]
-		for _, s := range sessions {
-			if lastMessageTime(s).After(since) {
-				filtered = append(filtered, s)
-			}
-		}
-		sessions = filtered
-		if len(sessions) == 0 {
-			fmt.Fprintf(os.Stderr, "no sessions found\n")
-			return
-		}
+	sessions = filterSessionsSince(sessions, since)
+	if len(sessions) == 0 {
+		fmt.Fprintf(os.Stderr, "no sessions found\n")
+		return
 	}
 
 	total := len(sessions)
