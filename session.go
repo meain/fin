@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -216,10 +217,69 @@ func LoadLastSession() (*Session, error) {
 	return &sessions[0], nil
 }
 
-// ListSessions prints saved sessions to stderr. limit=-1 for all.
-func ListSessions(limit int) {
+// SessionSummary is a lightweight representation for JSON output.
+type SessionSummary struct {
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Model        string    `json:"model"`
+	Name         string    `json:"name,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	MessageCount int       `json:"message_count"`
+	LastActivity time.Time `json:"last_activity"`
+}
+
+// parseSince parses a human duration string (e.g. "2d", "1w", "3h") into a time.Time cutoff.
+func parseSince(s string) (time.Time, error) {
+	var d time.Duration
+	switch {
+	case strings.HasSuffix(s, "w"):
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "w"))
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+		}
+		d = time.Duration(n) * 7 * 24 * time.Hour
+	case strings.HasSuffix(s, "d"):
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+		}
+		d = time.Duration(n) * 24 * time.Hour
+	default:
+		var err error
+		d, err = time.ParseDuration(s)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+		}
+	}
+	return time.Now().Add(-d), nil
+}
+
+// filterSessionsSince returns sessions whose last activity is after the cutoff.
+// A zero cutoff returns the slice unchanged.
+func filterSessionsSince(sessions []Session, since time.Time) []Session {
+	if since.IsZero() {
+		return sessions
+	}
+	var filtered []Session
+	for _, s := range sessions {
+		if lastMessageTime(s).After(since) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
+// ListSessions prints saved sessions. limit=-1 for all. since is zero to skip filtering.
+// Outputs JSON when stdout is not a terminal.
+func ListSessions(limit int, since time.Time) {
 	sessions, err := loadAllSessions()
 	if err != nil || len(sessions) == 0 {
+		fmt.Fprintf(os.Stderr, "no sessions found\n")
+		return
+	}
+
+	sessions = filterSessionsSince(sessions, since)
+	if len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
 	}
@@ -227,6 +287,30 @@ func ListSessions(limit int) {
 	total := len(sessions)
 	if limit > 0 && total > limit {
 		sessions = sessions[:limit]
+	}
+
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		summaries := make([]SessionSummary, len(sessions))
+		for i, sess := range sessions {
+			msgCount := 0
+			for _, m := range sess.Messages {
+				if m.Role != t.RoleSystem {
+					msgCount++
+				}
+			}
+			summaries[i] = SessionSummary{
+				ID:           sess.ID,
+				Title:        sess.Title,
+				Model:        sess.Model,
+				Name:         sess.Name,
+				StartedAt:    sess.StartedAt,
+				MessageCount: msgCount,
+				LastActivity: lastMessageTime(sess),
+			}
+		}
+		data, _ := json.MarshalIndent(summaries, "", "  ")
+		fmt.Println(string(data))
+		return
 	}
 
 	termWidth, _, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -237,7 +321,6 @@ func ListSessions(limit int) {
 	for idx, sess := range sessions {
 		title := sess.Title
 		if title == "" {
-			// Fallback for old sessions without a title
 			for _, m := range sess.Messages {
 				if m.Role == t.RoleUser {
 					title = m.Content
@@ -245,7 +328,6 @@ func ListSessions(limit int) {
 				}
 			}
 		}
-		// Replace newlines with spaces for single-line display
 		title = strings.ReplaceAll(title, "\n", " ")
 
 		msgCount := 0
@@ -263,7 +345,6 @@ func ListSessions(limit int) {
 
 		counter := fmt.Sprintf("%d.", idx+1)
 		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)
-		// visible: counter + " " + short + " " + title + " " + meta
 		maxTitle := termWidth - len(counter) - len(short) - len(meta) - 3
 		if maxTitle < 10 {
 			maxTitle = 10

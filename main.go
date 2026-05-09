@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/meain/fin/internal/provider"
 	t "github.com/meain/fin/internal/types"
@@ -27,6 +28,7 @@ func main() {
 	flag.StringVar(name, "n", "", "named session (short)")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
+	since := flag.String("since", "", "filter sessions by age: 1h, 2d, 1w (with -sessions)")
 	export := flag.String("export", "", "export format: json, html, message")
 	approve := flag.String("approve", "", "tool approval mode: all, safe, none")
 	yolo := flag.Bool("yolo", false, "alias for -approve all")
@@ -57,7 +59,16 @@ func main() {
 		if *allSessions {
 			limit = -1
 		}
-		ListSessions(limit)
+		var sinceTime time.Time
+		if *since != "" {
+			t, err := parseSince(*since)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				os.Exit(1)
+			}
+			sinceTime = t
+		}
+		ListSessions(limit, sinceTime)
 		return
 	}
 
