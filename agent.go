@@ -488,7 +488,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 		childModel = providerName + "/" + modelName
 	}
 
-	childUI := NewUI(nil, OutputSilent)
+	childUI := NewUI(nil, OutputSilent, false)
 	child := &Agent{
 		provider: p,
 		model:    childModel,

@@ -99,7 +99,7 @@ func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *Config) *Agent {
 		c := defaultConfig()
 		cfg = &c
 	}
-	ui := NewUI(nil, OutputSilent)
+	ui := NewUI(nil, OutputSilent, false)
 	return &Agent{
 		provider: fp,
 		tools:    tools,

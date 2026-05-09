@@ -11,7 +11,7 @@ import (
 	"golang.org/x/term"
 )
 
-var stderr = os.Stderr
+var stdout = os.Stdout
 
 // ANSI escape codes — variables so they can be cleared by disableColors().
 var (
@@ -167,6 +167,7 @@ type toolLineState struct {
 type UI struct {
 	term   *Terminal
 	mode   OutputMode
+	piped  bool // stdout is not a terminal; only stream response text to stdout
 	events chan UIEvent
 	done   chan struct{}
 
@@ -177,13 +178,14 @@ type UI struct {
 	toolLines         []toolLineState
 }
 
-func NewUI(t *Terminal, mode OutputMode) *UI {
+func NewUI(t *Terminal, mode OutputMode, piped bool) *UI {
 	if mode == OutputSilent {
 		return &UI{mode: mode}
 	}
 	u := &UI{
 		term:   t,
 		mode:   mode,
+		piped:  piped,
 		events: make(chan UIEvent, 64),
 		done:   make(chan struct{}),
 	}
@@ -337,7 +339,7 @@ func (u *UI) hasRunningTools() bool {
 func (u *UI) handleEvent(ev UIEvent) {
 	switch ev.Kind {
 	case uiStreamText:
-		if u.mode == OutputQuiet {
+		if u.mode == OutputQuiet || u.piped {
 			fmt.Fprint(os.Stdout, ev.Text)
 			return
 		}
@@ -368,7 +370,7 @@ func (u *UI) handleEvent(ev UIEvent) {
 		u.handleToolApproval(ev)
 
 	case uiInfo:
-		if u.mode != OutputDefault && u.mode != OutputDebug {
+		if u.piped || (u.mode != OutputDefault && u.mode != OutputDebug) {
 			return
 		}
 		u.write(fmt.Sprintf("%s%s%s\n", dim, ev.Text, reset))
@@ -465,7 +467,7 @@ func formatUsage(u *t.Usage) string {
 // --- Tool progress (streaming args) ---
 
 func (u *UI) handleToolProgress(name, argsSoFar string) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.piped {
 		return
 	}
 
@@ -482,15 +484,15 @@ func (u *UI) handleToolProgress(name, argsSoFar string) {
 		u.ensureNewline()
 	}
 
-	fmt.Fprintf(stderr, "\r\033[2K%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
-	stderr.Sync()
+	fmt.Fprintf(stdout, "\r\033[2K%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
+	stdout.Sync()
 	u.hasProgress = true
 }
 
 // --- Parallel tool status lines ---
 
 func (u *UI) handleToolStart(ev UIEvent) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.piped {
 		return
 	}
 
@@ -503,7 +505,7 @@ func (u *UI) handleToolStart(ev UIEvent) {
 	// First tool in batch: clear progress, allocate lines.
 	if ev.Index == 0 {
 		if u.hasProgress {
-			fmt.Fprint(stderr, "\033[2K\r")
+			fmt.Fprint(stdout, "\033[2K\r")
 			u.hasProgress = false
 			u.lastProgressLines = 0
 		} else {
@@ -529,7 +531,7 @@ func (u *UI) handleToolStart(ev UIEvent) {
 }
 
 func (u *UI) handleToolDone(ev UIEvent) {
-	if u.mode == OutputQuiet {
+	if u.mode == OutputQuiet || u.piped {
 		return
 	}
 
@@ -559,9 +561,9 @@ func (u *UI) updateToolLine(idx int) {
 	// Calculate distance from cursor (cursor is after the last tool line).
 	linesUp := len(u.toolLines) - idx
 	if linesUp > 0 {
-		fmt.Fprintf(stderr, "\033[%dA", linesUp)
+		fmt.Fprintf(stdout, "\033[%dA", linesUp)
 	}
-	fmt.Fprint(stderr, "\033[2K\r")
+	fmt.Fprint(stdout, "\033[2K\r")
 
 	tl := u.toolLines[idx]
 	elapsed := time.Since(tl.start)
@@ -593,12 +595,12 @@ func (u *UI) updateToolLine(idx int) {
 	maxLabel := getTermWidth() - suffixVisible - 1
 	label = truncateVisible(label, maxLabel)
 
-	fmt.Fprintf(stderr, "%s%s%s%s", bold, labelColor, label, reset+suffix)
+	fmt.Fprintf(stdout, "%s%s%s%s", bold, labelColor, label, reset+suffix)
 
 	if linesUp > 0 {
-		fmt.Fprintf(stderr, "\033[%dB\r", linesUp)
+		fmt.Fprintf(stdout, "\033[%dB\r", linesUp)
 	}
-	stderr.Sync()
+	stdout.Sync()
 }
 
 func (u *UI) refreshToolLines() {
@@ -621,7 +623,7 @@ func formatElapsed(d time.Duration) string {
 
 func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 	if u.hasProgress {
-		fmt.Fprint(stderr, "\033[2K\r")
+		fmt.Fprint(stdout, "\033[2K\r")
 		u.hasProgress = false
 		u.lastProgressLines = 0
 	} else {
@@ -657,13 +659,13 @@ func (u *UI) write(s string) {
 	if u.term != nil {
 		u.term.WriteString(s)
 	} else {
-		fmt.Fprint(stderr, s)
+		fmt.Fprint(os.Stdout, s)
 	}
 }
 
 func (u *UI) ensureNewline() {
 	if u.hasProgress {
-		fmt.Fprint(stderr, "\033[2K\r")
+		fmt.Fprint(stdout, "\033[2K\r")
 		u.hasProgress = false
 		u.lastProgressLines = 0
 	}
@@ -680,7 +682,7 @@ func (u *UI) debugLine(text string) {
 }
 
 func getTermWidth() int {
-	w, _, _ := term.GetSize(int(os.Stderr.Fd()))
+	w, _, _ := term.GetSize(int(os.Stdout.Fd()))
 	if w <= 0 {
 		w = 80
 	}

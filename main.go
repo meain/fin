@@ -41,7 +41,7 @@ func main() {
 	case "never":
 		disableColors()
 	case "auto":
-		if _, ok := os.LookupEnv("NO_COLOR"); ok || !term.IsTerminal(int(os.Stderr.Fd())) {
+		if _, ok := os.LookupEnv("NO_COLOR"); ok || !term.IsTerminal(int(os.Stdout.Fd())) {
 			disableColors()
 		}
 	case "always":
@@ -138,6 +138,10 @@ func main() {
 		outMode = parseOutputMode(*uiMode)
 	}
 
+	// Auto-detect piped stdout: suppress chrome, only stream response text.
+	// Explicit -ui flag overrides this.
+	piped := *uiMode == "" && !term.IsTerminal(int(os.Stdout.Fd()))
+
 	skills := DiscoverSkills(config)
 
 	args := flag.Args()
@@ -161,7 +165,7 @@ func main() {
 	} else if *cont || *session != "" {
 		sess, err := loadSession()
 		if err != nil {
-			ui := NewUI(nil, outMode)
+			ui := NewUI(nil, outMode, piped)
 			ui.Error(err.Error())
 			ui.Close()
 			os.Exit(1)
@@ -195,7 +199,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ui := NewUI(nil, outMode)
+	ui := NewUI(nil, outMode, piped)
 	defer ui.Close()
 	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills)
 
