@@ -58,6 +58,19 @@ func parseOutputMode(s string) OutputMode {
 	}
 }
 
+// resolveOutputMode picks the effective output mode. An explicit -ui flag always wins.
+// When no explicit flag or export format is set and stdout is not a terminal,
+// quiet mode is used automatically so piped invocations get clean text output.
+func resolveOutputMode(configMode, uiFlag, export string, stdoutFd int) OutputMode {
+	if uiFlag != "" {
+		return parseOutputMode(uiFlag)
+	}
+	if export == "" && !term.IsTerminal(stdoutFd) {
+		return OutputQuiet
+	}
+	return parseOutputMode(configMode)
+}
+
 // UIEventKind identifies the type of UI event.
 type UIEventKind int
 

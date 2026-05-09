@@ -133,10 +133,7 @@ func main() {
 		modelStr = config.Settings.DefaultModel
 	}
 
-	outMode := parseOutputMode(config.Settings.UI)
-	if *uiMode != "" {
-		outMode = parseOutputMode(*uiMode)
-	}
+	outMode := resolveOutputMode(config.Settings.UI, *uiMode, *export, int(os.Stdout.Fd()))
 
 	skills := DiscoverSkills(config)
 
