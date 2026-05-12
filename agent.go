@@ -40,29 +40,31 @@ type UIWriter interface {
 type Agent struct {
 	provider provider.Provider
 	model    string // model name for tagging assistant messages
-	tools    []tool.Tool
-	config   *Config
-	approval *toolApproval
-	ui       UIWriter
-	skills   []*Skill
-	messages []t.Message
-	Usage    t.Usage // accumulated token usage across all turns
+	tools     []tool.Tool
+	config    *Config
+	approval  *toolApproval
+	ui        UIWriter
+	skills    []*Skill
+	sessionID string
+	messages  []t.Message
+	Usage     t.Usage // accumulated token usage across all turns
 	OnUpdate  func([]t.Message)
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill) *Agent {
+func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill, sessionID string) *Agent {
 	tools := buildTools(skills)
-	systemPrompt := buildSystemPrompt(config, skills)
+	systemPrompt := buildSystemPrompt(config, skills, sessionID)
 
 	a := &Agent{
-		provider: p,
-		model:    model,
-		tools:    tools,
-		config:   config,
-		approval: approval,
-		ui:       ui,
-		skills:   skills,
+		provider:  p,
+		model:     model,
+		tools:     tools,
+		config:    config,
+		approval:  approval,
+		ui:        ui,
+		skills:    skills,
+		sessionID: sessionID,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},
 		},
@@ -466,7 +468,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 	}
 	childTools = append(childTools, &tool.SkillTool{Skills: entries})
 
-	systemPrompt := buildSystemPrompt(a.config, a.skills)
+	systemPrompt := buildSystemPrompt(a.config, a.skills, a.sessionID)
 
 	p := a.provider
 	childModel := a.model

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/meain/fin/internal/provider"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
@@ -199,9 +200,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Determine session ID early so it can be included in the system prompt.
+	sessionID := ""
+	if resumedSession != nil {
+		sessionID = resumedSession.ID
+	} else {
+		sessionID = uuid.New().String()
+	}
+
 	ui := NewUI(nil, outMode, piped)
 	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills)
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills, sessionID)
 
 	if resumedSession != nil {
 		agent.SetMessages(resumedSession.Messages)
@@ -214,10 +223,10 @@ func main() {
 	}
 	if sw == nil {
 		if *name != "" {
-			sw = NewSessionWriter(fullModel, *name)
+			sw = NewSessionWriter(sessionID, fullModel, *name)
 			ui.SessionInfo(SessionInfoData{Label: *name})
 		} else {
-			sw = NewSessionWriter(fullModel, "")
+			sw = NewSessionWriter(sessionID, fullModel, "")
 		}
 	}
 	agent.OnUpdate = func(msgs []t.Message) {
@@ -225,7 +234,7 @@ func main() {
 	}
 	agent.OnCompact = func() {
 		prevID := sw.id
-		sw = NewSessionWriter(fullModel, "")
+		sw = NewSessionWriter("", fullModel, "")
 		sw.previousSession = prevID
 	}
 

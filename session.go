@@ -44,11 +44,14 @@ type SessionWriter struct {
 }
 
 // NewSessionWriter creates a new session file and returns a writer for incremental saves.
-func NewSessionWriter(model, name string) *SessionWriter {
+// If id is empty, a new UUID is generated.
+func NewSessionWriter(id, model, name string) *SessionWriter {
 	dir := sessionPath()
 	os.MkdirAll(dir, 0755)
 
-	id := uuid.New().String()
+	if id == "" {
+		id = uuid.New().String()
+	}
 	cwd, _ := os.Getwd()
 	filename := fmt.Sprintf("%s_%s.json", time.Now().Format("20060102-150405"), id)
 	if name != "" {

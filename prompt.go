@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func buildSystemPrompt(config *Config, skills []*Skill) string {
+func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string {
 	var b strings.Builder
 	b.WriteString(baseSystemPrompt)
 
@@ -20,6 +20,9 @@ func buildSystemPrompt(config *Config, skills []*Skill) string {
 		runtime.GOOS, runtime.GOARCH,
 		cwd,
 	)
+	if sessionID != "" {
+		fmt.Fprintf(&b, "\n- Session ID: %s", sessionID)
+	}
 
 	// Available skills (progressive disclosure: name + description only)
 	if len(skills) > 0 {
