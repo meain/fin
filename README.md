@@ -14,6 +14,7 @@ Opinionated CLI agent harness in Go
 - **Prompt caching**: Anthropic system prompt and tool definitions cached automatically
 - **Token usage**: Input/output token counts and cache stats displayed after each run
 - **Piped input**: `git diff | fin "review this"`
+- **Shebang scripts**: `#!/usr/bin/env -S fin -f` — make prompt files executable
 - **Output modes**: Default (full ANSI), minimal (one-line tool summaries), quiet (stdout only)
 - **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
 - **Retry with backoff**: Automatic retry on rate limits and server errors
@@ -52,6 +53,9 @@ fin -model openai/gpt-4o "analyze this PR"
 # Auto-approve all tools
 fin -yolo "refactor this file"
 
+# Limit agent loop iterations
+fin --max-turns 3 "quick summary of this repo"
+
 # Output modes
 fin -ui minimal "what is in go.mod"   # compact tool display
 fin -ui quiet "summarize this file"   # only response text on stdout
@@ -60,6 +64,11 @@ fin -ui quiet "summarize this file"   # only response text on stdout
 git diff | fin "review this diff"
 cat error.log | fin "what went wrong"
 echo "func add(a, b int) string { return a + b }" | fin "fix this"
+
+# Prompt from file (shebang support)
+fin -f prompt.txt                            # read prompt from file
+fin -f prompt.txt "focus on error handling"  # file prompt + extra args
+echo "extra context" | fin -f prompt.txt     # file prompt + piped stdin
 ```
 
 ### Examples
@@ -77,6 +86,27 @@ Export the last response for use with other tools:
 ```
 $ fin -export message | pbcopy           # copy to clipboard
 $ fin -export message | glow             # render markdown in terminal
+```
+
+Shebang scripts — make prompt files directly executable:
+
+```bash
+#!/usr/bin/env -S fin -f
+Summarize the files in the current directory
+```
+
+```bash
+$ chmod +x summarize.fin
+$ ./summarize.fin                          # run the prompt
+$ ./summarize.fin "focus on Go files"      # append extra instructions
+$ git diff | ./summarize.fin "review this" # pipe input works too
+```
+
+Bake in flags:
+
+```bash
+#!/usr/bin/env -S fin -yolo --max-turns 3 -f
+Read all TODO comments in this project and create a summary
 ```
 
 Skills activate automatically when the task matches:

@@ -57,6 +57,9 @@ fin -ui default|debug|quiet     # output mode
 fin -approve all                # auto-approve all tools (also: safe, none)
 fin -yolo                       # alias for -approve all
 fin -match "prompt"             # search recent sessions, offer to continue matching one
+fin --max-turns 5 "prompt"     # limit agent loop iterations (overrides config)
+fin -f script.fin               # read prompt from file (strips shebang line)
+fin -f script.fin "extra args"  # file prompt + positional args appended
 ```
 
 ## Config

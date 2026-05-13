@@ -37,6 +37,7 @@ func main() {
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
+	promptFile := flag.String("f", "", "read prompt from file (for shebang scripts)")
 	flag.Parse()
 
 	switch *colorMode {
@@ -258,7 +259,25 @@ func main() {
 		ui.Debug(d)
 	}
 
-	if len(args) == 0 && pipedInput == "" {
+	// Read prompt from file if -f is set (shebang support).
+	var filePrompt string
+	if *promptFile != "" {
+		data, err := os.ReadFile(*promptFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		content := string(data)
+		// Strip shebang line
+		if strings.HasPrefix(content, "#!") {
+			if idx := strings.Index(content, "\n"); idx >= 0 {
+				content = content[idx+1:]
+			}
+		}
+		filePrompt = strings.TrimSpace(content)
+	}
+
+	if len(args) == 0 && pipedInput == "" && filePrompt == "" {
 		fmt.Fprintf(os.Stderr, "usage: fin [flags] \"prompt\"\n")
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -267,7 +286,15 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	prompt := strings.Join(args, " ")
+	// Compose prompt: file base + positional args + piped stdin
+	prompt := filePrompt
+	if argPrompt := strings.Join(args, " "); argPrompt != "" {
+		if prompt != "" {
+			prompt = prompt + "\n\n" + argPrompt
+		} else {
+			prompt = argPrompt
+		}
+	}
 	if pipedInput != "" {
 		if prompt != "" {
 			prompt = prompt + "\n\n" + pipedInput
