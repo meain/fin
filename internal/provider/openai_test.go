@@ -143,6 +143,119 @@ func TestToolDefsToOpenAI_MultipleTools(t *testing.T) {
 	}
 }
 
+func TestMessagesToOpenAI_ToolResultWithImages(t *testing.T) {
+	msgs := []tp.Message{
+		{
+			Role:       tp.RoleTool,
+			Content:    "Image content of file.png",
+			ToolCallID: "call_1",
+			Images: []tp.Image{
+				{MediaType: "image/png", Data: "iVBORw0KGgo="},
+			},
+		},
+	}
+	oaiMsgs := messagesToOpenAI(msgs)
+	// Tool result + injected user message with images
+	if len(oaiMsgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(oaiMsgs))
+	}
+
+	// First: tool message with text only
+	if oaiMsgs[0].Role != "tool" {
+		t.Fatalf("expected role 'tool', got %q", oaiMsgs[0].Role)
+	}
+	if oaiMsgs[0].Content != "Image content of file.png" {
+		t.Fatalf("expected string content, got %v", oaiMsgs[0].Content)
+	}
+
+	// Second: user message with image parts
+	if oaiMsgs[1].Role != "user" {
+		t.Fatalf("expected role 'user', got %q", oaiMsgs[1].Role)
+	}
+	parts, ok := oaiMsgs[1].Content.([]oaiContentPart)
+	if !ok {
+		t.Fatalf("expected content parts array, got %T", oaiMsgs[1].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(parts))
+	}
+	if parts[0].Type != "text" {
+		t.Fatalf("expected text part, got %q", parts[0].Type)
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil {
+		t.Fatalf("expected image_url part, got %+v", parts[1])
+	}
+	if parts[1].ImageURL.URL != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("unexpected image URL: %q", parts[1].ImageURL.URL)
+	}
+}
+
+func TestMessagesToOpenAI_UserMessageWithImages(t *testing.T) {
+	msgs := []tp.Message{
+		{
+			Role:    tp.RoleUser,
+			Content: "What is in this image?",
+			Images: []tp.Image{
+				{MediaType: "image/jpeg", Data: "/9j/4AAQ="},
+			},
+		},
+	}
+	oaiMsgs := messagesToOpenAI(msgs)
+	if len(oaiMsgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(oaiMsgs))
+	}
+	parts, ok := oaiMsgs[0].Content.([]oaiContentPart)
+	if !ok {
+		t.Fatalf("expected content parts array, got %T", oaiMsgs[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (text + image), got %d", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "What is in this image?" {
+		t.Fatalf("unexpected text part: %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL.URL != "data:image/jpeg;base64,/9j/4AAQ=" {
+		t.Fatalf("unexpected image part: %+v", parts[1])
+	}
+}
+
+func TestMessagesToOpenAI_ToolResultWithImagesJSON(t *testing.T) {
+	msgs := []tp.Message{
+		{
+			Role:       tp.RoleTool,
+			Content:    "screenshot captured",
+			ToolCallID: "call_img",
+			Images: []tp.Image{
+				{MediaType: "image/png", Data: "AAAA"},
+			},
+		},
+	}
+	req := oaiRequest{
+		Model:    "gpt-4o",
+		Messages: messagesToOpenAI(msgs),
+		Stream:   true,
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	messages := decoded["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages in JSON, got %d", len(messages))
+	}
+	// Verify user message has content array with image_url
+	userMsg := messages[1].(map[string]any)
+	contentArr := userMsg["content"].([]any)
+	imgPart := contentArr[1].(map[string]any)
+	if imgPart["type"] != "image_url" {
+		t.Fatalf("expected image_url type, got %v", imgPart["type"])
+	}
+}
+
 // --- JSON round-trip verification ---
 
 func TestOpenAIRequestJSON(t *testing.T) {

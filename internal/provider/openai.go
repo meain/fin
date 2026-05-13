@@ -41,9 +41,19 @@ type oaiRequest struct {
 
 type oaiMessage struct {
 	Role       string        `json:"role"`
-	Content    string        `json:"content,omitempty"`
+	Content    any           `json:"content,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+type oaiContentPart struct {
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	ImageURL *oaiImageURL `json:"image_url,omitempty"`
+}
+
+type oaiImageURL struct {
+	URL string `json:"url"`
 }
 
 type oaiToolCall struct {
@@ -81,9 +91,28 @@ func messagesToOpenAI(msgs []t.Message) []oaiMessage {
 	for _, m := range msgs {
 		om := oaiMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 		}
+
+		// Build content: use content parts array when images present
+		if len(m.Images) > 0 && m.Role != t.RoleTool {
+			parts := make([]oaiContentPart, 0, len(m.Images)+1)
+			if m.Content != "" {
+				parts = append(parts, oaiContentPart{Type: "text", Text: m.Content})
+			}
+			for _, img := range m.Images {
+				parts = append(parts, oaiContentPart{
+					Type: "image_url",
+					ImageURL: &oaiImageURL{
+						URL: "data:" + img.MediaType + ";base64," + img.Data,
+					},
+				})
+			}
+			om.Content = parts
+		} else {
+			om.Content = m.Content
+		}
+
 		for _, tc := range m.ToolCalls {
 			om.ToolCalls = append(om.ToolCalls, oaiToolCall{
 				ID:   tc.ID,
@@ -98,6 +127,28 @@ func messagesToOpenAI(msgs []t.Message) []oaiMessage {
 			})
 		}
 		out = append(out, om)
+
+		// Tool results with images: OpenAI tool messages only accept string
+		// content, so inject images as a follow-up user message
+		if m.Role == t.RoleTool && len(m.Images) > 0 {
+			parts := make([]oaiContentPart, 0, len(m.Images)+1)
+			parts = append(parts, oaiContentPart{
+				Type: "text",
+				Text: "[Images from tool result]",
+			})
+			for _, img := range m.Images {
+				parts = append(parts, oaiContentPart{
+					Type: "image_url",
+					ImageURL: &oaiImageURL{
+						URL: "data:" + img.MediaType + ";base64," + img.Data,
+					},
+				})
+			}
+			out = append(out, oaiMessage{
+				Role:    "user",
+				Content: parts,
+			})
+		}
 	}
 	return out
 }
