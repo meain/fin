@@ -9,7 +9,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const defaultConfigPath = "~/.config/fin/config.toml"
 
 type Config struct {
 	Models       ModelsConfig              `toml:"models"`
@@ -49,7 +48,7 @@ func defaultConfig() Config {
 			Primary: "anthropic/claude-sonnet-4-20250514",
 		},
 		Settings: Settings{
-			ProjectFile: "AGENTS.md",
+			ProjectFile: agentsFile,
 			MaxTurns:    50,
 		},
 		ModelAliases: map[string]string{},
@@ -77,9 +76,8 @@ func defaultConfig() Config {
 
 func loadConfig(path string) (*Config, error) {
 	if path == "" {
-		path = defaultConfigPath
+		path = configPath()
 	}
-	path = expandHome(path)
 
 	config := defaultConfig()
 

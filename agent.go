@@ -113,7 +113,7 @@ func loadBuiltinSkills() []tool.SkillEntry {
 		if !d.IsDir() {
 			continue
 		}
-		data, err := builtinSkillsFS.ReadFile("skills/" + d.Name() + "/SKILL.md")
+		data, err := builtinSkillsFS.ReadFile("skills/" + d.Name() + "/" + skillFile)
 		if err != nil {
 			continue
 		}

@@ -59,7 +59,7 @@ func DiscoverSkills(config *Config) []*Skill {
 	// 1. Project-level: .agents/skills/ in cwd and parent dirs
 	if dir, err := os.Getwd(); err == nil {
 		for {
-			skillsDir := filepath.Join(dir, ".agents", "skills")
+			skillsDir := filepath.Join(dir, agentsDir, skillsDirName)
 			for _, s := range scanSkillsDir(skillsDir) {
 				if !seen[s.Name] {
 					seen[s.Name] = true
@@ -76,8 +76,8 @@ func DiscoverSkills(config *Config) []*Skill {
 	}
 
 	// 2. User-level: ~/.agents/skills/
-	if home, err := os.UserHomeDir(); err == nil {
-		userDir := filepath.Join(home, ".agents", "skills")
+	if h := homeDir(); h != "" {
+		userDir := filepath.Join(h, agentsDir, skillsDirName)
 		for _, s := range scanSkillsDir(userDir) {
 			if !seen[s.Name] {
 				seen[s.Name] = true
@@ -104,8 +104,8 @@ func scanSkillsDir(dir string) []*Skill {
 			continue
 		}
 
-		skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
-		data, err := os.ReadFile(skillFile)
+		skillPath := filepath.Join(dir, e.Name(), skillFile)
+		data, err := os.ReadFile(skillPath)
 		if err != nil {
 			continue
 		}
@@ -131,10 +131,10 @@ func scanSkillsDir(dir string) []*Skill {
 
 // LoadSkillBody reads and returns the full SKILL.md body for a skill.
 func LoadSkillBody(skill *Skill) (string, error) {
-	skillFile := filepath.Join(skill.Dir, "SKILL.md")
-	data, err := os.ReadFile(skillFile)
+	skillPath := filepath.Join(skill.Dir, skillFile)
+	data, err := os.ReadFile(skillPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read %s: %w", skillFile, err)
+		return "", fmt.Errorf("failed to read %s: %w", skillPath, err)
 	}
 
 	parsed, err := parseSkillMD(data)

@@ -28,7 +28,7 @@ func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string
 	if len(skills) > 0 {
 		b.WriteString("\n\nAvailable skills (use the use_skill tool to activate one):\n")
 		for _, s := range skills {
-			fmt.Fprintf(&b, "- %s: %s (skill file: %s)\n", s.Name, s.Description, filepath.Join(s.Dir, "SKILL.md"))
+			fmt.Fprintf(&b, "- %s: %s (skill file: %s)\n", s.Name, s.Description, filepath.Join(s.Dir, skillFile))
 		}
 	}
 
@@ -48,11 +48,7 @@ func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string
 
 // readAgentsMD reads ~/.agents/AGENTS.md if it exists.
 func readAgentsMD() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".agents", "AGENTS.md"))
+	data, err := os.ReadFile(filepath.Join(homeDir(), agentsDir, agentsFile))
 	if err != nil {
 		return ""
 	}

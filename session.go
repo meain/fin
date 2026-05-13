@@ -15,8 +15,6 @@ import (
 	"golang.org/x/term"
 )
 
-const sessionDir = "~/.local/share/fin/sessions"
-
 type Session struct {
 	ID              string      `json:"id"`
 	Title           string      `json:"title"`
@@ -26,10 +24,6 @@ type Session struct {
 	PreviousSession string      `json:"previous_session,omitempty"`
 	StartedAt       time.Time   `json:"started_at"`
 	Messages        []t.Message `json:"messages"`
-}
-
-func sessionPath() string {
-	return expandHome(sessionDir)
 }
 
 // SessionWriter handles incremental session saving to a stable file.
