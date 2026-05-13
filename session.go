@@ -39,6 +39,7 @@ type SessionWriter struct {
 	cwd             string
 	name            string
 	previousSession string
+	title           string // LLM-generated title override
 	started         time.Time
 	filepath        string
 }
@@ -95,11 +96,20 @@ func SessionWriterForExisting(sess *Session) *SessionWriter {
 	}
 }
 
+// SetTitle sets an LLM-generated title that overrides the default truncated-message title.
+func (sw *SessionWriter) SetTitle(title string) {
+	sw.title = title
+}
+
 // Save writes the current messages to disk.
 func (sw *SessionWriter) Save(messages []t.Message) error {
+	title := sw.title
+	if title == "" {
+		title = sessionTitle(messages)
+	}
 	sess := Session{
 		ID:              sw.id,
-		Title:           sessionTitle(messages),
+		Title:           title,
 		Model:           sw.model,
 		Cwd:             sw.cwd,
 		Name:            sw.name,

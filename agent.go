@@ -453,6 +453,78 @@ func retryDelay(attempt int) time.Duration {
 	return delay + jitter
 }
 
+// GenerateTitle asks the cheap model to produce a short title for the session.
+// Requires models.cheap to be configured; returns "" if unset.
+func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
+	tm := a.config.Models.Secondary
+	if tm == "" {
+		return "", nil
+	}
+
+	var userMsg string
+	for _, m := range a.messages {
+		if m.Role == t.RoleUser {
+			userMsg = m.Content
+			break
+		}
+	}
+	if userMsg == "" {
+		return "", fmt.Errorf("no user message")
+	}
+
+	// Truncate to keep the title prompt small
+	if len(userMsg) > 300 {
+		userMsg = userMsg[:300]
+	}
+
+	prompt := "Generate a concise 3-7 word title describing what the user is asking about. Use sentence case (only first word and proper nouns capitalized). Do not answer the question. Reply with ONLY the title, no quotes or punctuation.\n\nUser: " + userMsg
+
+	providerName, modelName := resolveModel(tm, a.config)
+	providerCfg, ok := a.config.Providers[providerName]
+	if !ok {
+		return "", fmt.Errorf("unknown provider %q for title model", providerName)
+	}
+	rawProvider, err := provider.New(providerName, provider.Config{
+		BaseURL:   providerCfg.BaseURL,
+		APIKeyEnv: providerCfg.APIKeyEnv,
+		Headers:   providerCfg.Headers,
+	})
+	if err != nil {
+		return "", err
+	}
+	p := &modelInjector{provider: rawProvider, model: modelName}
+
+	stream, err := p.StreamCompletion(ctx, t.CompletionRequest{
+		Messages: []t.Message{
+			{Role: t.RoleUser, Content: prompt},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+
+	var buf strings.Builder
+	for {
+		delta, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+		buf.WriteString(delta.Content)
+	}
+
+	title := strings.TrimSpace(buf.String())
+	title = strings.Trim(title, `"'.`)
+	title = strings.Join(strings.Fields(title), " ")
+	if len(title) > 50 {
+		title = title[:50]
+	}
+	return title, nil
+}
+
 // runSubagent spawns an isolated child agent to handle a task.
 // The child gets the same tools (minus subagent) and config, but a fresh conversation.
 func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResult, error) {

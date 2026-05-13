@@ -131,7 +131,7 @@ func main() {
 	modelExplicit := *model != ""
 	modelStr := *model
 	if modelStr == "" {
-		modelStr = config.Settings.DefaultModel
+		modelStr = config.Models.Primary
 	}
 
 	outMode := parseOutputMode(config.Settings.UI)
@@ -277,6 +277,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Generate a descriptive session title in the background.
+	titleDone := make(chan struct{})
+	if resumedSession == nil {
+		go func() {
+			defer close(titleDone)
+			titleCtx, titleCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer titleCancel()
+			if title, err := agent.GenerateTitle(titleCtx); err == nil && title != "" {
+				sw.SetTitle(title)
+				_ = sw.Save(agent.Messages())
+			}
+		}()
+	} else {
+		close(titleDone)
+	}
+
 	if outMode == OutputDebug {
 		u := agent.Usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 {
@@ -289,6 +305,8 @@ func main() {
 			ui.Debug(DebugSummary{Usage: &u, Messages: msgCount})
 		}
 	}
+
+	<-titleDone
 }
 
 // promptSessionMatch searches recent sessions for matches to the query and

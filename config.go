@@ -12,6 +12,7 @@ import (
 const defaultConfigPath = "~/.config/fin/config.toml"
 
 type Config struct {
+	Models       ModelsConfig              `toml:"models"`
 	Settings     Settings                  `toml:"settings"`
 	ModelAliases map[string]string         `toml:"model_aliases"`
 	Providers    map[string]ProviderConfig `toml:"providers"`
@@ -19,11 +20,15 @@ type Config struct {
 }
 
 type Settings struct {
-	DefaultModel string `toml:"model"`
-	ProjectFile  string `toml:"project_file"`
-	MaxTurns     int    `toml:"max_turns"`
-	Approve      string `toml:"approve"` // "all", "safe", "none"
-	UI           string `toml:"ui"`      // "default", "quiet"
+	ProjectFile string `toml:"project_file"`
+	MaxTurns    int    `toml:"max_turns"`
+	Approve     string `toml:"approve"` // "all", "safe", "none"
+	UI          string `toml:"ui"`      // "default", "quiet"
+}
+
+type ModelsConfig struct {
+	Primary   string `toml:"primary"`   // main conversation model
+	Secondary string `toml:"secondary"` // used for secondary tasks like title generation
 }
 
 type ProviderConfig struct {
@@ -40,10 +45,12 @@ type ToolConfig struct {
 
 func defaultConfig() Config {
 	return Config{
+		Models: ModelsConfig{
+			Primary: "anthropic/claude-sonnet-4-20250514",
+		},
 		Settings: Settings{
-			DefaultModel: "anthropic/claude-sonnet-4-20250514",
-			ProjectFile:  "AGENTS.md",
-			MaxTurns:     50,
+			ProjectFile: "AGENTS.md",
+			MaxTurns:    50,
 		},
 		ModelAliases: map[string]string{},
 		Providers: map[string]ProviderConfig{

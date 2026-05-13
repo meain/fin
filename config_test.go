@@ -151,8 +151,10 @@ func TestLoadConfig_TempFile(t *testing.T) {
 	configPath := filepath.Join(dir, "config.toml")
 
 	content := `
+[models]
+primary = "openai/gpt-4o"
+
 [settings]
-model = "openai/gpt-4o"
 project_file = "AGENTS.md"
 max_turns = 20
 approve = "all"
@@ -176,8 +178,8 @@ approval = "auto"
 		t.Fatalf("loadConfig failed: %v", err)
 	}
 
-	if cfg.Settings.DefaultModel != "openai/gpt-4o" {
-		t.Errorf("expected model %q, got %q", "openai/gpt-4o", cfg.Settings.DefaultModel)
+	if cfg.Models.Primary != "openai/gpt-4o" {
+		t.Errorf("expected model %q, got %q", "openai/gpt-4o", cfg.Models.Primary)
 	}
 	if cfg.Settings.MaxTurns != 20 {
 		t.Errorf("expected max_turns 20, got %d", cfg.Settings.MaxTurns)
@@ -203,8 +205,8 @@ func TestLoadConfig_DefaultCreation(t *testing.T) {
 	}
 
 	// Should have default values
-	if cfg.Settings.DefaultModel != "anthropic/claude-sonnet-4-20250514" {
-		t.Errorf("expected default model, got %q", cfg.Settings.DefaultModel)
+	if cfg.Models.Primary != "anthropic/claude-sonnet-4-20250514" {
+		t.Errorf("expected default model, got %q", cfg.Models.Primary)
 	}
 
 	// File should have been created

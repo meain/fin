@@ -63,7 +63,8 @@ fin -match "prompt"             # search recent sessions, offer to continue matc
 
 TOML at `~/.config/fin/config.toml`:
 
-- `[settings]` — `default_model`, `project_file`, `max_turns`, `auto_approve`, `ui`
+- `[models]` — `primary` (main conversation model), `secondary` (secondary tasks like title generation)
+- `[settings]` — `project_file`, `max_turns`, `approve`, `ui`
 - `[model_aliases]` — short names mapping to `provider/model`
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`
 - `[tools.*]` — `approval` (auto/confirm/deny), `allow`/`deny` glob patterns for shell
