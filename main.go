@@ -36,6 +36,7 @@ func main() {
 	uiMode := flag.String("ui", "", "output mode: default, quiet")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
+	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
 	flag.Parse()
 
 	switch *colorMode {
@@ -127,6 +128,10 @@ func main() {
 	}
 	config.Settings.Approve = approveMode
 	approval := buildToolApproval(approveMode, config.Tools)
+
+	if *maxTurns > 0 {
+		config.Settings.MaxTurns = *maxTurns
+	}
 
 	modelExplicit := *model != ""
 	modelStr := *model
