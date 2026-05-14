@@ -75,7 +75,7 @@ func TestSessionWriter_SaveAndLoad(t *testing.T) {
 		model:    "anthropic/claude-sonnet",
 		cwd:      "/tmp/test",
 		started:  time.Now(),
-		filepath: filepath.Join(dir, "test_session.json"),
+		filepath: filepath.Join(dir, "test_session.jsonl"),
 	}
 
 	messages := []t2.Message{
@@ -87,15 +87,9 @@ func TestSessionWriter_SaveAndLoad(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Verify file was written
-	data, err := os.ReadFile(sw.filepath)
+	sess, err := readSessionFile(sw.filepath)
 	if err != nil {
 		t.Fatalf("failed to read saved session: %v", err)
-	}
-
-	var sess Session
-	if err := json.Unmarshal(data, &sess); err != nil {
-		t.Fatalf("failed to unmarshal session: %v", err)
 	}
 
 	if sess.ID != "test-id-1234" {
@@ -109,6 +103,264 @@ func TestSessionWriter_SaveAndLoad(t *testing.T) {
 	}
 	if len(sess.Messages) != 2 {
 		t.Errorf("expected 2 messages, got %d", len(sess.Messages))
+	}
+}
+
+func TestSessionWriter_AppendOnly(t *testing.T) {
+	dir := t.TempDir()
+	sw := &SessionWriter{
+		id:       "append-test",
+		model:    "m",
+		started:  time.Now(),
+		filepath: filepath.Join(dir, "append.jsonl"),
+	}
+	msgs := []t2.Message{{Role: t2.RoleUser, Content: "a"}}
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+	statBefore, _ := os.Stat(sw.filepath)
+	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "b"})
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+	statAfter, _ := os.Stat(sw.filepath)
+	if statAfter.Size() <= statBefore.Size() {
+		t.Fatalf("expected file to grow, before=%d after=%d", statBefore.Size(), statAfter.Size())
+	}
+	sess, err := readSessionFile(sw.filepath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.Messages) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(sess.Messages))
+	}
+}
+
+func TestSessionWriter_ResumeAppends(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	// Initial session with one user message.
+	sw := NewSessionWriter("resume-id", "m", "")
+	initial := []t2.Message{{Role: t2.RoleUser, Content: "first"}}
+	if err := sw.Save(initial); err != nil {
+		t.Fatal(err)
+	}
+	originalPath := sw.filepath
+
+	// Reload via the same code path the CLI uses.
+	loaded, err := readSessionFile(originalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(loaded.Messages))
+	}
+
+	// SessionWriterForExisting should reuse the existing file, full-rewrite
+	// once (headerDirty), then append subsequent saves.
+	sw2 := SessionWriterForExisting(loaded)
+	if sw2.filepath != originalPath {
+		t.Fatalf("expected reuse of %s, got %s", originalPath, sw2.filepath)
+	}
+	if !sw2.headerDirty {
+		t.Fatal("resumed writer should have headerDirty=true")
+	}
+
+	msgs := append(loaded.Messages, t2.Message{Role: t2.RoleAssistant, Content: "reply"})
+	if err := sw2.Save(msgs); err != nil { // triggers full rewrite
+		t.Fatal(err)
+	}
+	if sw2.headerDirty {
+		t.Error("headerDirty should be cleared after rewrite")
+	}
+	if sw2.lastWrittenCount != 2 {
+		t.Errorf("expected lastWrittenCount=2, got %d", sw2.lastWrittenCount)
+	}
+
+	sizeBefore, _ := os.Stat(sw2.filepath)
+	msgs = append(msgs, t2.Message{Role: t2.RoleUser, Content: "third"})
+	if err := sw2.Save(msgs); err != nil { // should append, not rewrite
+		t.Fatal(err)
+	}
+	sizeAfter, _ := os.Stat(sw2.filepath)
+	if sizeAfter.Size() <= sizeBefore.Size() {
+		t.Errorf("expected file to grow on append, before=%d after=%d", sizeBefore.Size(), sizeAfter.Size())
+	}
+
+	final, err := readSessionFile(sw2.filepath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(final.Messages) != 3 {
+		t.Errorf("expected 3 messages after append, got %d", len(final.Messages))
+	}
+	if final.Messages[2].Content != "third" {
+		t.Errorf("expected third message preserved, got %q", final.Messages[2].Content)
+	}
+}
+
+func TestSessionWriter_ConflictDetected(t *testing.T) {
+	dir := t.TempDir()
+	sw := &SessionWriter{
+		id:       "conflict-test",
+		model:    "m",
+		started:  time.Now(),
+		filepath: filepath.Join(dir, "conflict.jsonl"),
+	}
+	msgs := []t2.Message{{Role: t2.RoleUser, Content: "first"}}
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate another process touching the file with a later mtime.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(sw.filepath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "second"})
+	err := sw.Save(msgs)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !sw.conflicted {
+		t.Error("writer should be marked conflicted after mismatch")
+	}
+	// Subsequent saves keep returning the conflict error and do not write.
+	statBefore, _ := os.Stat(sw.filepath)
+	err2 := sw.Save(msgs)
+	if err2 == nil {
+		t.Fatal("expected conflict error on subsequent save, got nil")
+	}
+	statAfter, _ := os.Stat(sw.filepath)
+	if statAfter.Size() != statBefore.Size() {
+		t.Errorf("file should not change after conflict; before=%d after=%d", statBefore.Size(), statAfter.Size())
+	}
+}
+
+func TestSessionWriter_ResumeDetectsExternalWrite(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	sw := NewSessionWriter("ext-test", "m", "")
+	if err := sw.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := readSessionFile(sw.filepath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Another fin process completes a write between load and resume.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(sw.filepath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed := SessionWriterForExisting(loaded)
+	// SessionWriterForExisting snapshots mtime at construction so this resume
+	// itself is fine; the test guards against double-resume by simulating
+	// a *further* external write between construction and first save.
+	further := time.Now().Add(4 * time.Second)
+	if err := os.Chtimes(sw.filepath, further, further); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := append(loaded.Messages, t2.Message{Role: t2.RoleAssistant, Content: "second"})
+	if err := resumed.Save(msgs); err == nil {
+		t.Fatal("expected conflict on resumed save after external mtime change, got nil")
+	}
+}
+
+func TestReadSessionFile_DropsTruncatedTrailingLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "truncated.jsonl")
+	sw := &SessionWriter{
+		id:       "trunc-test",
+		model:    "m",
+		started:  time.Now(),
+		filepath: path,
+	}
+	msgs := []t2.Message{
+		{Role: t2.RoleUser, Content: "first"},
+		{Role: t2.RoleAssistant, Content: "second"},
+	}
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crash mid-append: tack on a half-written JSON object.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"role":"user","content":"halfwr`); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	sess, err := readSessionFile(path)
+	if err != nil {
+		t.Fatalf("reader should tolerate trailing corrupt line, got: %v", err)
+	}
+	if len(sess.Messages) != 2 {
+		t.Fatalf("expected 2 messages (trailing corrupt dropped), got %d", len(sess.Messages))
+	}
+	if sess.Messages[1].Content != "second" {
+		t.Errorf("expected last good message preserved, got %q", sess.Messages[1].Content)
+	}
+}
+
+func TestReadSessionFile_RejectsCorruptMiddleLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corrupt-middle.jsonl")
+	content := `{"id":"x","title":"t","model":"m","cwd":"","started_at":"2026-01-01T00:00:00Z"}
+{"role":"user","content":"first"}
+not-json-at-all
+{"role":"assistant","content":"third"}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSessionFile(path); err == nil {
+		t.Fatal("expected error for corrupt middle line, got nil")
+	}
+}
+
+func TestSessionWriter_SetTitleTriggersRewrite(t *testing.T) {
+	dir := t.TempDir()
+	sw := &SessionWriter{
+		id:       "title-test",
+		model:    "m",
+		started:  time.Now(),
+		filepath: filepath.Join(dir, "title.jsonl"),
+	}
+	msgs := []t2.Message{{Role: t2.RoleUser, Content: "hello"}}
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+	sw.SetTitle("My Title")
+	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "hi"})
+	if err := sw.Save(msgs); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := readSessionFile(sw.filepath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Title != "My Title" {
+		t.Errorf("expected title %q, got %q", "My Title", sess.Title)
+	}
+	if len(sess.Messages) != 2 {
+		t.Errorf("expected 2 messages after rewrite, got %d", len(sess.Messages))
 	}
 }
 
@@ -317,29 +569,36 @@ func TestFilterSessionsSince_AllOld(t *testing.T) {
 	}
 }
 
-// writeTestSession saves a minimal session JSON to dir for use in ListSessions tests.
+// writeTestSession saves a minimal session JSONL to dir for use in ListSessions tests.
 func writeTestSession(t *testing.T, dir string, id string, age time.Duration, msgCount int) {
 	t.Helper()
 	now := time.Now()
+	backdated := now.Add(-age)
 	msgs := make([]t2.Message, msgCount)
 	for i := range msgs {
-		msgs[i] = t2.Message{Role: t2.RoleUser, Content: "test", Timestamp: now.Add(-age)}
+		msgs[i] = t2.Message{Role: t2.RoleUser, Content: "test", Timestamp: backdated}
 	}
-	sess := Session{
+	filename := backdated.Format("20060102-150405") + "_" + id + ".jsonl"
+	path := filepath.Join(dir, filename)
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(sessionHeader{
 		ID:        id,
 		Title:     "test session " + id,
 		Model:     "test/model",
-		StartedAt: now.Add(-age),
-		Messages:  msgs,
+		StartedAt: backdated,
+	}); err != nil {
+		t.Fatalf("writeTestSession encode header: %v", err)
 	}
-	data, _ := json.MarshalIndent(sess, "", "  ")
-	filename := now.Add(-age).Format("20060102-150405") + "_" + id + ".json"
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	for i := range msgs {
+		if err := enc.Encode(msgs[i]); err != nil {
+			t.Fatalf("writeTestSession encode msg: %v", err)
+		}
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
 		t.Fatalf("writeTestSession: %v", err)
 	}
-	// Match mtime to the backdated session age so mtime-based filters work.
-	backdated := now.Add(-age)
 	if err := os.Chtimes(path, backdated, backdated); err != nil {
 		t.Fatalf("writeTestSession chtimes: %v", err)
 	}

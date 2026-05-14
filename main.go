@@ -235,8 +235,12 @@ func main() {
 			sw = NewSessionWriter(sessionID, fullModel, "")
 		}
 	}
+	var saveWarned bool
 	agent.OnUpdate = func(msgs []t.Message) {
-		_ = sw.Save(msgs)
+		if err := sw.Save(msgs); err != nil && !saveWarned {
+			ui.Error(fmt.Sprintf("session save: %v", err))
+			saveWarned = true
+		}
 	}
 	agent.OnCompact = func() {
 		prevID := sw.id
