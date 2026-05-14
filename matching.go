@@ -86,9 +86,15 @@ func scoreSession(sess Session, keywords []string) float64 {
 	return raw / float64(len(keywords))
 }
 
+// maxMatchScan caps how many recent sessions are scanned by FindMatchingSessions.
+// Beyond this the cost of parsing JSONL bodies dominates and recency makes older
+// hits unlikely to be useful anyway.
+const maxMatchScan = 100
+
 // FindMatchingSessions searches the most recent sessions and returns those
 // whose score is at or above minScore, sorted by score descending.
-// limit caps how many sessions are searched (0 = all).
+// limit caps how many sessions are searched (0 = use maxMatchScan).
+// The effective scan size is always min(limit, maxMatchScan).
 func FindMatchingSessions(query string, limit int, minScore float64) []SessionMatch {
 	keywords := extractKeywords(query)
 	if len(keywords) == 0 {
@@ -100,7 +106,10 @@ func FindMatchingSessions(query string, limit int, minScore float64) []SessionMa
 		return nil
 	}
 
-	if limit > 0 && len(entries) > limit {
+	if limit <= 0 || limit > maxMatchScan {
+		limit = maxMatchScan
+	}
+	if len(entries) > limit {
 		entries = entries[:limit]
 	}
 
