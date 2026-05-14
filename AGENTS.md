@@ -91,6 +91,31 @@ TOML at `~/.config/fin/config.toml`:
 1. Create `skills/<name>/SKILL.md` with YAML frontmatter (name, description) and markdown body
 2. It gets embedded automatically via `embed.go` and loaded in `agent.go`'s `loadBuiltinSkills()`
 
+## Generating the demo GIF
+
+The README's demo is rendered with [vhs](https://github.com/charmbracelet/vhs) from `demo.tape`.
+
+```
+go install . && vhs demo.tape   # writes demo.gif
+```
+
+Notes on the tape:
+- `go install .` first so the tape can call `fin` directly (no in-tape build).
+- PS1 is set to `\n❯ ` and each command is followed by `Wait+Line /❯/`. VHS auto-advances when the prompt comes back, so per-command timing is driven by reality, not by guessed `Sleep`s. Leading `\n` keeps a blank line between command output and the next prompt. When adding new sections, keep the prompt marker in sync if you change PS1.
+- Setup (PS1, cleanup) lives in a `Hide` block so only `fin` commands appear on screen. Commands end with an inline `# what it does` comment so the viewer knows what each one demonstrates.
+- The render takes ~2–3 min and produces a multi-MB GIF. Don't open/load the GIF after generation — it's big enough to blow up tooling context.
+- When adding a feature worth showing, add a new numbered section and re-run.
+
+### Hosting the demo GIF
+
+`demo.gif` is **gitignored** to keep the repo small. After regenerating, host it elsewhere and update the README link:
+
+1. Open a comment on a tracking issue (e.g. https://github.com/meain/fin/issues/5) and drag-drop the GIF — GitHub uploads it to `user-attachments` and emits an `<img src="...">` snippet.
+2. Grab the `src` URL from the comment (`gh api repos/meain/fin/issues/comments/<id> --jq '.body'`).
+3. Replace the `![demo](...)` URL in `README.md`.
+
+This avoids bloating the repo with a multi-MB binary on every regen.
+
 ## Debugging past runs
 
 Use sessions to review how fin handled a task and identify agent behavior issues:

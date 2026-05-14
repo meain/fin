@@ -2,7 +2,7 @@
 
 Opinionated CLI agent harness in Go
 
-![demo](demo.gif)
+![demo](https://github.com/user-attachments/assets/751eb81a-794e-4da2-9775-bbee956a62c9)
 
 ## Features
 
