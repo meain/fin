@@ -138,14 +138,6 @@ func readDir(root string) (string, error) {
 			return nil
 		}
 		parts := strings.Split(rel, string(filepath.Separator))
-		for _, p := range parts {
-			if strings.HasPrefix(p, ".") {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
 		depth := len(parts) - 1
 		if depth > 3 {
 			if info.IsDir() {
@@ -176,13 +168,16 @@ func readDirFlat(root string) (string, error) {
 
 	var b strings.Builder
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
+		name := e.Name()
+		isHidden := strings.HasPrefix(name, ".")
 		if e.IsDir() {
-			fmt.Fprintf(&b, "%s/\n", e.Name())
-		} else {
-			fmt.Fprintf(&b, "%s\n", e.Name())
+			if isHidden {
+				fmt.Fprintf(&b, "%s/ [hidden, contents not shown]\n", name)
+			} else {
+				fmt.Fprintf(&b, "%s/\n", name)
+			}
+		} else if !isHidden {
+			fmt.Fprintf(&b, "%s\n", name)
 		}
 	}
 	fmt.Fprintf(&b, "\n[directory has too many entries for full tree — showing top-level only. Read specific subdirectories to explore further.]\n")
@@ -203,15 +198,6 @@ func readDirTree(root string) (string, error) {
 		}
 
 		parts := strings.Split(rel, string(filepath.Separator))
-		for _, p := range parts {
-			if strings.HasPrefix(p, ".") {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-
 		depth := len(parts) - 1
 		if depth > 3 {
 			if info.IsDir() {
@@ -220,11 +206,17 @@ func readDirTree(root string) (string, error) {
 			return nil
 		}
 
-		indent := strings.Repeat("  ", depth)
 		name := info.Name()
+		isHidden := strings.HasPrefix(name, ".")
+		indent := strings.Repeat("  ", depth)
+
 		if info.IsDir() {
+			if isHidden {
+				fmt.Fprintf(&b, "%s%s/ [hidden, contents not shown]\n", indent, name)
+				return filepath.SkipDir
+			}
 			fmt.Fprintf(&b, "%s%s/\n", indent, name)
-		} else {
+		} else if !isHidden {
 			fmt.Fprintf(&b, "%s%s\n", indent, name)
 		}
 		return nil
