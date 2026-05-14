@@ -26,7 +26,7 @@ Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal pa
 
 ### Embedded files
 - `system_prompt.md` — Base system prompt
-- `skills/about-fin/SKILL.md` — Builtin skill describing fin itself
+- `skills/about_fin/SKILL.md` — Builtin skill describing fin itself. **Keep this in sync** when adding/removing user-visible features (new tools, flags, persistence changes, config keys, output modes, etc.) — it is loaded into the LLM's context to answer "what is fin / what can fin do" questions, so stale entries actively mislead.
 
 ## Conventions
 
