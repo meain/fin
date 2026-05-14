@@ -95,14 +95,20 @@ func FindMatchingSessions(query string, limit int, minScore float64) []SessionMa
 		return nil
 	}
 
-	sessions, err := loadAllSessions()
-	if err != nil || len(sessions) == 0 {
+	entries, err := sessionEntries()
+	if err != nil || len(entries) == 0 {
 		return nil
 	}
 
-	if limit > 0 && len(sessions) > limit {
-		sessions = sessions[:limit]
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
 	}
+
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.path
+	}
+	sessions := parseSessionFiles(paths)
 
 	var matches []SessionMatch
 	for _, sess := range sessions {

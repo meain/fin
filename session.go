@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -137,59 +138,123 @@ func sessionTitle(messages []t.Message) string {
 	return ""
 }
 
-// loadAllSessions reads and parses all session files, sorted newest first.
-func loadAllSessions() ([]Session, error) {
+// sessionEntry is a cheap (no JSON parse) view of a session file.
+type sessionEntry struct {
+	path  string
+	name  string
+	mtime time.Time
+}
+
+// sessionEntries returns all session files in the sessions dir, sorted by mtime desc.
+// No JSON parsing — uses only dirent + stat.
+func sessionEntries() ([]sessionEntry, error) {
 	dir := sessionPath()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-
-	var sessions []Session
+	out := make([]sessionEntry, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		var sess Session
-		if err := json.Unmarshal(data, &sess); err != nil {
-			continue
-		}
-		sessions = append(sessions, sess)
+		out = append(out, sessionEntry{
+			path:  filepath.Join(dir, e.Name()),
+			name:  e.Name(),
+			mtime: info.ModTime(),
+		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].mtime.After(out[j].mtime) })
+	return out, nil
+}
 
-	// Sort by last message timestamp descending
-	sort.Slice(sessions, func(i, j int) bool {
-		return lastMessageTime(sessions[i]).After(lastMessageTime(sessions[j]))
-	})
+// readSessionFile reads and unmarshals a single session JSON file.
+func readSessionFile(path string) (*Session, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
 
-	return sessions, nil
+// parseSessionFiles reads and parses the given session files in parallel.
+// Failed reads are silently skipped. Input order is preserved.
+func parseSessionFiles(paths []string) []Session {
+	out := make([]Session, len(paths))
+	ok := make([]bool, len(paths))
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, path string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			s, err := readSessionFile(path)
+			if err != nil {
+				return
+			}
+			out[idx] = *s
+			ok[idx] = true
+		}(i, p)
+	}
+	wg.Wait()
+	filtered := make([]Session, 0, len(paths))
+	for i, v := range ok {
+		if v {
+			filtered = append(filtered, out[i])
+		}
+	}
+	return filtered
+}
+
+// uuidFromFilename extracts the UUID portion of a session filename.
+// Filenames are "YYYYMMDD-HHMMSS_<uuid>[_<name>].json".
+func uuidFromFilename(name string) string {
+	base := strings.TrimSuffix(name, ".json")
+	parts := strings.SplitN(base, "_", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
 }
 
 // LoadSessionByIndex loads the Nth most recent session (1-based).
+// Ranking by mtime; parses only the chosen file.
 func LoadSessionByIndex(index int) (*Session, error) {
-	sessions, err := loadAllSessions()
-	if err != nil || len(sessions) == 0 {
+	entries, err := sessionEntries()
+	if err != nil || len(entries) == 0 {
 		return nil, fmt.Errorf("no sessions found")
 	}
-	if index < 1 || index > len(sessions) {
-		return nil, fmt.Errorf("session index %d out of range (1-%d)", index, len(sessions))
+	if index < 1 || index > len(entries) {
+		return nil, fmt.Errorf("session index %d out of range (1-%d)", index, len(entries))
 	}
-	return &sessions[index-1], nil
+	return readSessionFile(entries[index-1].path)
 }
 
-// LoadSessionByID loads a session by its UUID from the JSON metadata.
+// LoadSessionByID loads a session by its UUID (or prefix) using the filename.
+// Parses only the matching file.
 func LoadSessionByID(id string) (*Session, error) {
-	sessions, err := loadAllSessions()
+	entries, err := sessionEntries()
 	if err != nil {
 		return nil, fmt.Errorf("session %s not found", id)
 	}
-	for i := range sessions {
-		if sessions[i].ID == id || strings.HasPrefix(sessions[i].ID, id) {
-			return &sessions[i], nil
+	for _, e := range entries {
+		uuidPart := uuidFromFilename(e.name)
+		if uuidPart == "" {
+			continue
+		}
+		if uuidPart == id || strings.HasPrefix(uuidPart, id) {
+			return readSessionFile(e.path)
 		}
 	}
 	return nil, fmt.Errorf("session %s not found", id)
@@ -202,26 +267,17 @@ func LoadSessionByName(name string) (*Session, error) {
 	if err != nil || len(matches) == 0 {
 		return nil, fmt.Errorf("session %q not found", name)
 	}
-	// Use the most recent match (last alphabetically since filenames start with timestamp)
-	fp := matches[len(matches)-1]
-	data, err := os.ReadFile(fp)
-	if err != nil {
-		return nil, err
-	}
-	var sess Session
-	if err := json.Unmarshal(data, &sess); err != nil {
-		return nil, err
-	}
-	return &sess, nil
+	// Use the most recent match (last alphabetically since filenames start with timestamp).
+	return readSessionFile(matches[len(matches)-1])
 }
 
-// LoadLastSession loads the most recent session.
+// LoadLastSession loads the most recently modified session.
 func LoadLastSession() (*Session, error) {
-	sessions, err := loadAllSessions()
-	if err != nil || len(sessions) == 0 {
+	entries, err := sessionEntries()
+	if err != nil || len(entries) == 0 {
 		return nil, fmt.Errorf("no sessions found")
 	}
-	return &sessions[0], nil
+	return readSessionFile(entries[0].path)
 }
 
 // SessionSummary is a lightweight representation for JSON output.
@@ -262,7 +318,8 @@ func parseSince(s string) (time.Time, error) {
 }
 
 // filterSessionsSince returns sessions whose last activity is after the cutoff.
-// A zero cutoff returns the slice unchanged.
+// A zero cutoff returns the slice unchanged. Kept for tests; ListSessions
+// uses mtime-based filtering on file entries before parsing.
 func filterSessionsSince(sessions []Session, since time.Time) []Session {
 	if since.IsZero() {
 		return sessions
@@ -278,23 +335,38 @@ func filterSessionsSince(sessions []Session, since time.Time) []Session {
 
 // ListSessions prints saved sessions. limit=-1 for all. since is zero to skip filtering.
 // Outputs JSON when stdout is not a terminal.
+// Pre-ranks by mtime (cheap), then parses only the kept slice.
 func ListSessions(limit int, since time.Time) {
-	sessions, err := loadAllSessions()
-	if err != nil || len(sessions) == 0 {
+	entries, err := sessionEntries()
+	if err != nil || len(entries) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
 	}
 
-	sessions = filterSessionsSince(sessions, since)
-	if len(sessions) == 0 {
+	if !since.IsZero() {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.mtime.After(since) {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+	}
+	if len(entries) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
 	}
 
-	total := len(sessions)
+	total := len(entries)
 	if limit > 0 && total > limit {
-		sessions = sessions[:limit]
+		entries = entries[:limit]
 	}
+
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.path
+	}
+	sessions := parseSessionFiles(paths)
 
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		summaries := make([]SessionSummary, len(sessions))

@@ -334,8 +334,14 @@ func writeTestSession(t *testing.T, dir string, id string, age time.Duration, ms
 	}
 	data, _ := json.MarshalIndent(sess, "", "  ")
 	filename := now.Add(-age).Format("20060102-150405") + "_" + id + ".json"
-	if err := os.WriteFile(filepath.Join(dir, filename), data, 0644); err != nil {
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatalf("writeTestSession: %v", err)
+	}
+	// Match mtime to the backdated session age so mtime-based filters work.
+	backdated := now.Add(-age)
+	if err := os.Chtimes(path, backdated, backdated); err != nil {
+		t.Fatalf("writeTestSession chtimes: %v", err)
 	}
 }
 
