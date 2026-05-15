@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meain/fin/internal/agent"
 	"github.com/meain/fin/internal/approval"
 	"github.com/meain/fin/internal/config"
+	"github.com/meain/fin/internal/export"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/session"
 	"github.com/meain/fin/internal/skill"
 	t "github.com/meain/fin/internal/types"
+	"github.com/meain/fin/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -35,7 +38,7 @@ func main() {
 	sessions := flag.Bool("sessions", false, "list saved sessions")
 	allSessions := flag.Bool("all", false, "show all sessions (with -sessions)")
 	since := flag.String("since", "", "filter sessions by age: 1h, 2d, 1w (with -sessions)")
-	export := flag.String("export", "", "export format: json, html, message")
+	exportFlag := flag.String("export", "", "export format: json, html, message")
 	approve := flag.String("approve", "", "tool approval mode: all, safe, none")
 	yolo := flag.Bool("yolo", false, "alias for -approve all")
 	uiMode := flag.String("ui", "", "output mode: default, quiet")
@@ -105,17 +108,17 @@ func main() {
 		return session.LoadLast()
 	}
 
-	if *export != "" {
+	if *exportFlag != "" {
 		sess, err := loadSession()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
-		switch *export {
+		switch *exportFlag {
 		case "json":
-			ExportJSON(sess, os.Stdout)
+			export.JSON(sess, os.Stdout)
 		case "html":
-			ExportHTML(sess, os.Stdout)
+			export.HTML(sess, os.Stdout)
 		case "message":
 			for i := len(sess.Messages) - 1; i >= 0; i-- {
 				if sess.Messages[i].Role == t.RoleAssistant && sess.Messages[i].Content != "" {
@@ -126,7 +129,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "no assistant message found\n")
 			os.Exit(1)
 		default:
-			fmt.Fprintf(os.Stderr, "unknown export format: %s (use json, html, or message)\n", *export)
+			fmt.Fprintf(os.Stderr, "unknown export format: %s (use json, html, or message)\n", *exportFlag)
 			os.Exit(1)
 		}
 		return
@@ -152,9 +155,9 @@ func main() {
 		modelStr = cfg.Models.Primary
 	}
 
-	outMode := parseOutputMode(cfg.Settings.UI)
+	outMode := ui.ParseOutputMode(cfg.Settings.UI)
 	if *uiMode != "" {
-		outMode = parseOutputMode(*uiMode)
+		outMode = ui.ParseOutputMode(*uiMode)
 	}
 
 	// Auto-detect piped stdout: suppress chrome, only stream response text.
@@ -184,9 +187,9 @@ func main() {
 	} else if *cont || *sessionFlag != "" {
 		sess, err := loadSession()
 		if err != nil {
-			ui := NewUI(nil, outMode, piped)
-			ui.Error(err.Error())
-			ui.Close()
+			u := ui.New(nil, outMode, piped)
+			u.Error(err.Error())
+			u.Close()
 			os.Exit(1)
 		}
 		resumedSession = sess
@@ -226,35 +229,35 @@ func main() {
 		sessionID = uuid.New().String()
 	}
 
-	ui := NewUI(nil, outMode, piped)
-	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, cfg, app, ui, skills, sessionID, enabledTools)
+	u := ui.New(nil, outMode, piped)
+	defer u.Close()
+	ag := agent.New(agent.NewProviderInjector(p, modelName), fullModel, cfg, app, u, skills, sessionID, enabledTools)
 
 	if resumedSession != nil {
-		agent.SetMessages(resumedSession.Messages)
+		ag.SetMessages(resumedSession.Messages)
 		sw = session.WriterForExisting(resumedSession)
 		label := resumedSession.ID
 		if resumedSession.Name != "" {
 			label = resumedSession.Name
 		}
-		ui.SessionInfo(SessionInfoData{Resumed: true, Label: label, StartedAt: resumedSession.StartedAt})
+		u.SessionInfo(agent.SessionInfoData{Resumed: true, Label: label, StartedAt: resumedSession.StartedAt})
 	}
 	if sw == nil {
 		if *name != "" {
 			sw = session.NewWriter(sessionID, fullModel, *name)
-			ui.SessionInfo(SessionInfoData{Label: *name})
+			u.SessionInfo(agent.SessionInfoData{Label: *name})
 		} else {
 			sw = session.NewWriter(sessionID, fullModel, "")
 		}
 	}
 	var saveWarned bool
-	agent.OnUpdate = func(msgs []t.Message) {
+	ag.OnUpdate = func(msgs []t.Message) {
 		if err := sw.Save(msgs); err != nil && !saveWarned {
-			ui.Error(fmt.Sprintf("session save: %v", err))
+			u.Error(fmt.Sprintf("session save: %v", err))
 			saveWarned = true
 		}
 	}
-	agent.OnCompact = func() {
+	ag.OnCompact = func() {
 		prevID := sw.ID()
 		sw = session.NewWriter("", fullModel, "")
 		sw.SetPreviousSession(prevID)
@@ -262,17 +265,17 @@ func main() {
 
 	// Startup debug info
 	{
-		d := DebugStartup{Model: fullModel, SessionID: sw.ID()}
+		d := agent.DebugStartup{Model: fullModel, SessionID: sw.ID()}
 		if len(skills) > 0 {
 			d.Skills = make([]string, len(skills))
 			for i, s := range skills {
 				d.Skills[i] = s.Name
 			}
 		}
-		if msgs := agent.Messages(); len(msgs) > 0 {
+		if msgs := ag.Messages(); len(msgs) > 0 {
 			d.PromptChars = len(msgs[0].Content)
 		}
-		ui.Debug(d)
+		u.Debug(d)
 	}
 
 	// Read prompt from file if -f is set (shebang support).
@@ -319,9 +322,9 @@ func main() {
 		}
 	}
 
-	if err := agent.AddUserMessage(ctx, prompt); err != nil {
-		ui.Error(err.Error())
-		ui.Close()
+	if err := ag.AddUserMessage(ctx, prompt); err != nil {
+		u.Error(err.Error())
+		u.Close()
 		os.Exit(1)
 	}
 
@@ -332,25 +335,25 @@ func main() {
 			defer close(titleDone)
 			titleCtx, titleCancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer titleCancel()
-			if title, err := agent.GenerateTitle(titleCtx); err == nil && title != "" {
+			if title, err := ag.GenerateTitle(titleCtx); err == nil && title != "" {
 				sw.SetTitle(title)
-				_ = sw.Save(agent.Messages())
+				_ = sw.Save(ag.Messages())
 			}
 		}()
 	} else {
 		close(titleDone)
 	}
 
-	if outMode == OutputDebug {
-		u := agent.Usage
-		if u.InputTokens > 0 || u.OutputTokens > 0 {
+	if outMode == ui.OutputDebug {
+		usage := ag.Usage
+		if usage.InputTokens > 0 || usage.OutputTokens > 0 {
 			msgCount := 0
-			for _, m := range agent.Messages() {
+			for _, m := range ag.Messages() {
 				if m.Role != t.RoleSystem {
 					msgCount++
 				}
 			}
-			ui.Debug(DebugSummary{Usage: &u, Messages: msgCount})
+			u.Debug(agent.DebugSummary{Usage: &usage, Messages: msgCount})
 		}
 	}
 
@@ -512,13 +515,3 @@ func parseToolsFlag(v string) (map[string]bool, error) {
 	return out, nil
 }
 
-// modelInjector wraps a Provider to inject the model name into every request.
-type modelInjector struct {
-	provider provider.Provider
-	model    string
-}
-
-func (m *modelInjector) StreamCompletion(ctx context.Context, req t.CompletionRequest) (provider.Stream, error) {
-	req.Model = m.model
-	return m.provider.StreamCompletion(ctx, req)
-}

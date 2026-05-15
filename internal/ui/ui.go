@@ -1,4 +1,8 @@
-package main
+// Package ui is the terminal implementation of agent.UIWriter. It owns
+// every formatting decision: ANSI codes, cursor moves, terminal width
+// detection, raw-mode approval prompts. None of these leak back into
+// agent or any other consumer.
+package ui
 
 import (
 	"encoding/json"
@@ -7,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meain/fin/internal/agent"
 	"github.com/meain/fin/internal/input"
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/tool"
@@ -26,7 +31,9 @@ const (
 	OutputSilent                    // no output at all (for subagents)
 )
 
-func parseOutputMode(s string) OutputMode {
+// ParseOutputMode maps a config/flag string to an OutputMode. Unknown
+// values fall back to OutputDefault.
+func ParseOutputMode(s string) OutputMode {
 	switch s {
 	case "quiet":
 		return OutputQuiet
@@ -55,80 +62,22 @@ const (
 	uiDebug // only shown in debug mode
 )
 
-// DebugEvent is implemented by all structured debug payloads.
-type DebugEvent interface {
-	debugEvent()
-}
-
-type DebugStartup struct {
-	Model       string
-	Skills      []string
-	SessionID   string
-	PromptChars int
-}
-
-type DebugTurnStart struct {
-	Turn     int
-	MaxTurns int
-	Messages int
-}
-
-type DebugTurnDone struct {
-	Usage   *t.Usage
-	TTFT    time.Duration
-	Elapsed time.Duration
-}
-
-type DebugToolArgs struct {
-	ToolName string
-	ToolArgs map[string]any
-}
-
-type DebugMessageCount struct {
-	Messages int
-}
-
-type DebugSummary struct {
-	Usage    *t.Usage
-	Messages int
-}
-
-func (DebugStartup) debugEvent()      {}
-func (DebugTurnStart) debugEvent()    {}
-func (DebugTurnDone) debugEvent()     {}
-func (DebugToolArgs) debugEvent()     {}
-func (DebugMessageCount) debugEvent() {}
-func (DebugSummary) debugEvent()      {}
-
-// SessionInfoData carries session status for the UI to render.
-type SessionInfoData struct {
-	Resumed   bool
-	Label     string    // session ID or name
-	StartedAt time.Time // only relevant for resumed sessions
-}
-
-// RetryData carries structured retry information for the UI to render.
-type RetryData struct {
-	Attempt    int
-	MaxRetries int
-	Delay      time.Duration
-	Err        error
-}
-
-// UIEvent is a message sent to the UI goroutine.
+// UIEvent is a message sent to the UI goroutine. Structured payload types
+// (SessionInfoData, RetryData, DebugEvent) live in the agent package — the
+// agent is their producer.
 type UIEvent struct {
-	Kind   UIEventKind
-	Text   string
-	Name   string
-	Args   map[string]any
-	Result t.ToolResult
-	Err    error
-	Index  int        // tool index in parallel batch
-	Total  int        // total tools in batch
-	Reply  chan bool   // for approval response
-	Session *SessionInfoData // structured session info (uiSessionInfo only)
-	Retry   *RetryData      // structured retry payload (uiRetry only)
-	Debug   DebugEvent      // structured debug payload (uiDebug only)
+	Kind    UIEventKind
+	Text    string
+	Name    string
+	Args    map[string]any
+	Result  t.ToolResult
+	Err     error
+	Index   int
+	Total   int
+	Reply   chan bool
+	Session *agent.SessionInfoData
+	Retry   *agent.RetryData
+	Debug   agent.DebugEvent
 }
 
 // toolLineState tracks one tool in a parallel batch.
@@ -157,7 +106,9 @@ type UI struct {
 	toolLines         []toolLineState
 }
 
-func NewUI(t *input.Terminal, mode OutputMode, piped bool) *UI {
+// New constructs a UI bound to the given terminal (or nil) and mode. When
+// mode is OutputSilent, returns a stub UI that no-ops on every method.
+func New(t *input.Terminal, mode OutputMode, piped bool) *UI {
 	if mode == OutputSilent {
 		return &UI{mode: mode}
 	}
@@ -255,15 +206,15 @@ func (u *UI) Error(msg string) {
 	u.send(UIEvent{Kind: uiError, Text: msg})
 }
 
-func (u *UI) SessionInfo(data SessionInfoData) {
+func (u *UI) SessionInfo(data agent.SessionInfoData) {
 	u.send(UIEvent{Kind: uiSessionInfo, Session: &data})
 }
 
-func (u *UI) Retry(data RetryData) {
+func (u *UI) Retry(data agent.RetryData) {
 	u.send(UIEvent{Kind: uiRetry, Retry: &data})
 }
 
-func (u *UI) Debug(ev DebugEvent) {
+func (u *UI) Debug(ev agent.DebugEvent) {
 	if u.mode != OutputDebug {
 		return
 	}
@@ -385,12 +336,12 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 // --- Debug rendering ---
 
-func (u *UI) renderDebug(ev DebugEvent) {
+func (u *UI) renderDebug(ev agent.DebugEvent) {
 	if ev == nil {
 		return
 	}
 	switch d := ev.(type) {
-	case DebugStartup:
+	case agent.DebugStartup:
 		parts := []string{d.Model}
 		sid := d.SessionID
 		if len(sid) > 8 {
@@ -402,9 +353,9 @@ func (u *UI) renderDebug(ev DebugEvent) {
 			parts = append(parts, fmt.Sprintf("%d char prompt", d.PromptChars))
 		}
 		u.debugLine(strings.Join(parts, " | "))
-	case DebugTurnStart:
+	case agent.DebugTurnStart:
 		u.debugLine(fmt.Sprintf("turn %d/%d | %d messages", d.Turn, d.MaxTurns, d.Messages))
-	case DebugTurnDone:
+	case agent.DebugTurnDone:
 		s := render.FormatUsage(d.Usage)
 		if d.TTFT > time.Millisecond {
 			s += fmt.Sprintf(" | ttft: %s", render.FormatElapsed(d.TTFT))
@@ -415,12 +366,12 @@ func (u *UI) renderDebug(ev DebugEvent) {
 		if s != "" {
 			u.debugLine(s)
 		}
-	case DebugToolArgs:
+	case agent.DebugToolArgs:
 		argsJSON, _ := json.Marshal(d.ToolArgs)
 		u.debugLine(fmt.Sprintf("  %s %s", d.ToolName, string(argsJSON)))
-	case DebugMessageCount:
+	case agent.DebugMessageCount:
 		u.debugLine(fmt.Sprintf("%d messages", d.Messages))
-	case DebugSummary:
+	case agent.DebugSummary:
 		s := "total: " + render.FormatUsage(d.Usage)
 		s += fmt.Sprintf(" | %d messages", d.Messages)
 		u.debugLine(s)

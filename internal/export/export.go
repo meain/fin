@@ -1,4 +1,6 @@
-package main
+// Package export renders sessions as JSON, HTML, or just-last-message text
+// for the -export CLI flag.
+package export
 
 import (
 	"bytes"
@@ -32,7 +34,7 @@ func renderMarkdown(src string) string {
 }
 
 // ExportJSON writes the session as formatted JSON to w.
-func ExportJSON(sess *session.Session, w io.Writer) {
+func JSON(sess *session.Session, w io.Writer) {
 	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
 		fmt.Fprintf(w, "error: %s\n", err)
@@ -43,7 +45,7 @@ func ExportJSON(sess *session.Session, w io.Writer) {
 }
 
 // ExportHTML writes the session as a self-contained HTML page to w.
-func ExportHTML(sess *session.Session, w io.Writer) {
+func HTML(sess *session.Session, w io.Writer) {
 	title := sess.Title
 	if title == "" {
 		title = "fin session"

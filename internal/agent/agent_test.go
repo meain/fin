@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"context"
@@ -101,13 +101,12 @@ func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *config.Config) *Agen
 		c := config.Default()
 		cfg = &c
 	}
-	ui := NewUI(nil, OutputSilent, false)
 	return &Agent{
 		provider: fp,
 		tools:    tools,
 		config:   cfg,
 		approval: approval.Build(cfg.Settings.Approve, cfg.Tools),
-		ui:       ui,
+		ui:       nullUI{},
 		messages: []tp.Message{{Role: tp.RoleSystem, Content: "test"}},
 	}
 }
