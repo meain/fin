@@ -46,14 +46,15 @@ type Agent struct {
 	ui        UIWriter
 	skills    []*Skill
 	sessionID string
+	enabled   map[string]bool // tool filter; nil = all enabled, empty = none
 	messages  []t.Message
 	Usage     t.Usage // accumulated token usage across all turns
 	OnUpdate  func([]t.Message)
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill, sessionID string) *Agent {
-	tools := buildTools(skills)
+func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill, sessionID string, enabled map[string]bool) *Agent {
+	tools := buildTools(skills, enabled)
 	systemPrompt := buildSystemPrompt(config, skills, sessionID)
 
 	a := &Agent{
@@ -65,6 +66,7 @@ func NewAgent(p provider.Provider, model string, config *Config, approval *toolA
 		ui:        ui,
 		skills:    skills,
 		sessionID: sessionID,
+		enabled:   enabled,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},
 		},
@@ -81,7 +83,7 @@ func NewAgent(p provider.Provider, model string, config *Config, approval *toolA
 	return a
 }
 
-func buildTools(skills []*Skill) []tool.Tool {
+func buildTools(skills []*Skill, enabled map[string]bool) []tool.Tool {
 	tools := tool.BuiltinTools()
 
 	entries := loadBuiltinSkills()
@@ -98,7 +100,21 @@ func buildTools(skills []*Skill) []tool.Tool {
 	// SubagentTool added here; RunSubagent callback is wired up in NewAgent.
 	tools = append(tools, &tool.SubagentTool{})
 
-	return tools
+	return filterTools(tools, enabled)
+}
+
+// filterTools applies the -tools allow-list. nil = keep all, empty = drop all.
+func filterTools(tools []tool.Tool, enabled map[string]bool) []tool.Tool {
+	if enabled == nil {
+		return tools
+	}
+	out := make([]tool.Tool, 0, len(tools))
+	for _, tl := range tools {
+		if enabled[tl.Name()] {
+			out = append(out, tl)
+		}
+	}
+	return out
 }
 
 func loadBuiltinSkills() []tool.SkillEntry {
@@ -539,6 +555,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 		})
 	}
 	childTools = append(childTools, &tool.SkillTool{Skills: entries})
+	childTools = filterTools(childTools, a.enabled)
 
 	systemPrompt := buildSystemPrompt(a.config, a.skills, a.sessionID)
 

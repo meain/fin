@@ -60,6 +60,7 @@ fin -match "prompt"             # search recent sessions, offer to continue matc
 fin --max-turns 5 "prompt"     # limit agent loop iterations (overrides config)
 fin -f script.fin               # read prompt from file (strips shebang line)
 fin -f script.fin "extra args"  # file prompt + positional args appended
+fin -tools read,shell "prompt"  # restrict tool set (all, none, or comma list)
 ```
 
 ## Config

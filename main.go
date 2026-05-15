@@ -38,7 +38,14 @@ func main() {
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
 	promptFile := flag.String("f", "", "read prompt from file (for shebang scripts)")
+	toolsFlag := flag.String("tools", "", "tools to enable: all, none, or comma-separated list (e.g. read,shell)")
 	flag.Parse()
+
+	enabledTools, err := parseToolsFlag(*toolsFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(1)
+	}
 
 	switch *colorMode {
 	case "never":
@@ -216,7 +223,7 @@ func main() {
 
 	ui := NewUI(nil, outMode, piped)
 	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills, sessionID)
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills, sessionID, enabledTools)
 
 	if resumedSession != nil {
 		agent.SetMessages(resumedSession.Messages)
@@ -401,6 +408,38 @@ func promptSessionMatch(query string) *Session {
 		}
 	}
 	return nil
+}
+
+// parseToolsFlag interprets the -tools flag value.
+// Returns: nil set = all tools enabled; non-nil empty map = none; populated map = filter.
+func parseToolsFlag(v string) (map[string]bool, error) {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "all" {
+		return nil, nil
+	}
+	if v == "none" {
+		return map[string]bool{}, nil
+	}
+
+	valid := map[string]bool{
+		"read": true, "write": true, "edit": true, "shell": true,
+		"compact": true, "use_skill": true, "subagent": true,
+	}
+	out := map[string]bool{}
+	for _, name := range strings.Split(v, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !valid[name] {
+			return nil, fmt.Errorf("unknown tool %q (valid: read, write, edit, shell, compact, use_skill, subagent)", name)
+		}
+		out[name] = true
+	}
+	if len(out) == 0 {
+		return map[string]bool{}, nil
+	}
+	return out, nil
 }
 
 // modelInjector wraps a Provider to inject the model name into every request.
