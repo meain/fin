@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,15 @@ type ShellTool struct {
 }
 
 func (st *ShellTool) Name() string { return "shell" }
+
+func (st *ShellTool) Label(args map[string]any) ToolLabel {
+	cmd, _ := args["command"].(string)
+	if cmd == "" {
+		return ToolLabel{}
+	}
+	cmd = strings.ReplaceAll(cmd, "\n", `\n`)
+	return ToolLabel{Primary: "$ " + cmd}
+}
 
 func (st *ShellTool) Description() string {
 	return "Execute a shell command via sh -c. Returns stdout and stderr separately. If you need them interleaved in order, append 2>&1 to your command."

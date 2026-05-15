@@ -26,6 +26,11 @@ type SkillTool struct {
 
 func (st *SkillTool) Name() string { return "use_skill" }
 
+func (st *SkillTool) Label(args map[string]any) ToolLabel {
+	name, _ := args["name"].(string)
+	return ToolLabel{Primary: name}
+}
+
 func (st *SkillTool) Description() string {
 	return "Activate a skill to load its full instructions, or read a file from a skill's directory. Pass the skill name to activate it. Optionally pass a file path to read a specific resource from the skill."
 }

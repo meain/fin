@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/meain/fin/internal/render"
+	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
@@ -642,55 +643,18 @@ func getTermWidth() int {
 	return w - 1 // leave 1 col to prevent terminal line wrap
 }
 
-// toolLabel returns a short description like "read agent.go" or "shell $ ls".
+// toolLabel renders a tool name plus its structured ToolLabel as a terminal
+// line ("read agent.go", "shell $ ls", "edit foo.go (-3 +5)"). Label primary
+// and detail come from tool.LabelFor; ANSI wrapping happens here so the same
+// label can be rendered as plain text by other consumers.
 func toolLabel(name string, args map[string]any) string {
-	switch name {
-	case "shell":
-		if cmd, ok := args["command"].(string); ok {
-			cmd = strings.ReplaceAll(cmd, "\n", `\n`)
-			return name + render.Reset + " " + render.Dim + "$ " + cmd
-		}
-	case "read":
-		if path, ok := args["path"].(string); ok {
-			offset, hasOffset := args["offset"].(float64)
-			limit, hasLimit := args["limit"].(float64)
-			if hasOffset || hasLimit {
-				if hasOffset && hasLimit {
-					return fmt.Sprintf("%s%s %s%s (%d:%d)", name, render.Reset, render.Dim, path, int(offset), int(offset)+int(limit))
-				} else if hasOffset {
-					return fmt.Sprintf("%s%s %s%s (%d:)", name, render.Reset, render.Dim, path, int(offset))
-				} else {
-					return fmt.Sprintf("%s%s %s%s (:%d)", name, render.Reset, render.Dim, path, int(limit))
-				}
-			}
-			return name + render.Reset + " " + render.Dim + path
-		}
-	case "write":
-		if path, ok := args["path"].(string); ok {
-			return name + render.Reset + " " + render.Dim + path
-		}
-	case "edit":
-		if path, ok := args["path"].(string); ok {
-			old, _ := args["old_string"].(string)
-			nw, _ := args["new_string"].(string)
-			oldLines := strings.Count(old, "\n") + 1
-			newLines := strings.Count(nw, "\n") + 1
-			return fmt.Sprintf("%s%s %s%s (-%d +%d)", name, render.Reset, render.Dim, path, oldLines, newLines)
-		}
-	case "use_skill":
-		if skill, ok := args["name"].(string); ok {
-			return name + render.Reset + " " + render.Dim + skill
-		}
-	case "subagent":
-		if task, ok := args["task"].(string); ok {
-			display := task
-			if len(display) > 60 {
-				display = display[:60] + "…"
-			}
-			return name + render.Reset + " " + render.Dim + display
-		}
-	case "compact":
+	label := tool.LabelFor(name, args)
+	switch {
+	case label.Primary != "" && label.Detail != "":
+		return fmt.Sprintf("%s%s %s%s (%s)", name, render.Reset, render.Dim, label.Primary, label.Detail)
+	case label.Primary != "":
+		return name + render.Reset + " " + render.Dim + label.Primary
+	default:
 		return name
 	}
-	return name
 }

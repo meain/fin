@@ -30,6 +30,13 @@ func (rt *ReadTool) Description() string {
 	return "Read the contents of a file, an image, or list the structure of a directory. Returns file content with line numbers, image data for vision models, or a directory tree."
 }
 
+func (rt *ReadTool) Label(args map[string]any) ToolLabel {
+	path, _ := args["path"].(string)
+	offset, hasOffset := args["offset"].(float64)
+	limit, hasLimit := args["limit"].(float64)
+	return ToolLabel{Primary: path, Detail: rangeDetail(offset, limit, hasOffset, hasLimit)}
+}
+
 func (rt *ReadTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

@@ -322,80 +322,114 @@ func (s *anthropicStream) Recv() (t.StreamDelta, error) {
 			continue
 		}
 
-		switch eventType {
-		case "content_block_start":
-			var ev anthContentBlockStart
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				continue
-			}
-			if ev.ContentBlock.Type == "tool_use" {
-				s.toolCallID = ev.ContentBlock.ID
-				return t.StreamDelta{
-					ToolCalls: []t.ToolCallDelta{{
-						Index: ev.Index,
-						ID:    ev.ContentBlock.ID,
-						Name:  ev.ContentBlock.Name,
-					}},
-				}, nil
-			}
-
-		case "content_block_delta":
-			var ev anthContentBlockDelta
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				continue
-			}
-			switch ev.Delta.Type {
-			case "text_delta":
-				return t.StreamDelta{Content: ev.Delta.Text}, nil
-			case "input_json_delta":
-				return t.StreamDelta{
-					ToolCalls: []t.ToolCallDelta{{
-						Index:     ev.Index,
-						Arguments: ev.Delta.PartialJSON,
-					}},
-				}, nil
-			}
-
-		case "message_start":
-			var ev anthMessageStart
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				continue
-			}
-			u := ev.Message.Usage
-			return t.StreamDelta{
-				Usage: &t.Usage{
-					InputTokens:              u.InputTokens,
-					CacheCreationInputTokens: u.CacheCreationInputTokens,
-					CacheReadInputTokens:     u.CacheReadInputTokens,
-				},
-			}, nil
-
-		case "message_delta":
-			var ev anthMessageDelta
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				continue
-			}
-			if ev.Usage.OutputTokens > 0 {
-				return t.StreamDelta{
-					Usage: &t.Usage{OutputTokens: ev.Usage.OutputTokens},
-				}, nil
-			}
-
-		case "content_block_stop":
-			s.toolCallID = ""
-
-		case "message_stop":
-			s.done = true
-			return t.StreamDelta{}, io.EOF
-
-		case "error":
-			var ev anthErrorEvent
-			if err := json.Unmarshal([]byte(data), &ev); err != nil {
-				return t.StreamDelta{}, fmt.Errorf("anthropic stream error: %s", data)
-			}
-			return t.StreamDelta{}, fmt.Errorf("anthropic error: %s: %s", ev.Error.Type, ev.Error.Message)
+		delta, emit, err := s.handleEvent(eventType, data)
+		if err != nil {
+			return t.StreamDelta{}, err
+		}
+		if emit {
+			return delta, nil
 		}
 	}
+}
+
+// handleEvent dispatches one SSE event to the matching handler. emit=false
+// means the event was consumed but produced no observable delta (advance
+// the loop). err is fatal and stops the stream.
+func (s *anthropicStream) handleEvent(eventType, data string) (t.StreamDelta, bool, error) {
+	switch eventType {
+	case "content_block_start":
+		return s.handleContentBlockStart(data)
+	case "content_block_delta":
+		return s.handleContentBlockDelta(data)
+	case "message_start":
+		return handleAnthropicMessageStart(data)
+	case "message_delta":
+		return handleAnthropicMessageDelta(data)
+	case "content_block_stop":
+		s.toolCallID = ""
+		return t.StreamDelta{}, false, nil
+	case "message_stop":
+		s.done = true
+		return t.StreamDelta{}, false, io.EOF
+	case "error":
+		return t.StreamDelta{}, false, handleAnthropicErrorEvent(data)
+	}
+	return t.StreamDelta{}, false, nil
+}
+
+func (s *anthropicStream) handleContentBlockStart(data string) (t.StreamDelta, bool, error) {
+	ev, ok := decodeOrSkip[anthContentBlockStart](data)
+	if !ok || ev.ContentBlock.Type != "tool_use" {
+		return t.StreamDelta{}, false, nil
+	}
+	s.toolCallID = ev.ContentBlock.ID
+	return t.StreamDelta{
+		ToolCalls: []t.ToolCallDelta{{
+			Index: ev.Index,
+			ID:    ev.ContentBlock.ID,
+			Name:  ev.ContentBlock.Name,
+		}},
+	}, true, nil
+}
+
+func (s *anthropicStream) handleContentBlockDelta(data string) (t.StreamDelta, bool, error) {
+	ev, ok := decodeOrSkip[anthContentBlockDelta](data)
+	if !ok {
+		return t.StreamDelta{}, false, nil
+	}
+	switch ev.Delta.Type {
+	case "text_delta":
+		return t.StreamDelta{Content: ev.Delta.Text}, true, nil
+	case "input_json_delta":
+		return t.StreamDelta{
+			ToolCalls: []t.ToolCallDelta{{
+				Index:     ev.Index,
+				Arguments: ev.Delta.PartialJSON,
+			}},
+		}, true, nil
+	}
+	return t.StreamDelta{}, false, nil
+}
+
+func handleAnthropicMessageStart(data string) (t.StreamDelta, bool, error) {
+	ev, ok := decodeOrSkip[anthMessageStart](data)
+	if !ok {
+		return t.StreamDelta{}, false, nil
+	}
+	u := ev.Message.Usage
+	return t.StreamDelta{
+		Usage: &t.Usage{
+			InputTokens:              u.InputTokens,
+			CacheCreationInputTokens: u.CacheCreationInputTokens,
+			CacheReadInputTokens:     u.CacheReadInputTokens,
+		},
+	}, true, nil
+}
+
+func handleAnthropicMessageDelta(data string) (t.StreamDelta, bool, error) {
+	ev, ok := decodeOrSkip[anthMessageDelta](data)
+	if !ok || ev.Usage.OutputTokens == 0 {
+		return t.StreamDelta{}, false, nil
+	}
+	return t.StreamDelta{Usage: &t.Usage{OutputTokens: ev.Usage.OutputTokens}}, true, nil
+}
+
+func handleAnthropicErrorEvent(data string) error {
+	ev, ok := decodeOrSkip[anthErrorEvent](data)
+	if !ok {
+		return fmt.Errorf("anthropic stream error: %s", data)
+	}
+	return fmt.Errorf("anthropic error: %s: %s", ev.Error.Type, ev.Error.Message)
+}
+
+// decodeOrSkip unmarshals data into a value of type T. Returns false when
+// the payload is malformed — callers treat that as "skip this event".
+func decodeOrSkip[T any](data string) (*T, bool) {
+	var v T
+	if err := json.Unmarshal([]byte(data), &v); err != nil {
+		return nil, false
+	}
+	return &v, true
 }
 
 // readSSEEvent reads a single SSE event (event: + data: lines).

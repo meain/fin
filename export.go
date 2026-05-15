@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	finembed "github.com/meain/fin/internal/embed"
+	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
 
 	"github.com/yuin/goldmark"
@@ -46,7 +47,30 @@ func ExportHTML(sess *Session, w io.Writer) {
 	if title == "" {
 		title = "fin session"
 	}
+	writeHTMLHead(w, title, sess)
 
+	opts := renderOpts{
+		UserLabel:      "you",
+		CollapseLabels: true,
+		ToolMap:        buildToolCallMap(sess.Messages),
+		ExpandSubagent: true,
+	}
+	renderMessageList(w, sess.Messages, opts)
+
+	fmt.Fprint(w, "<script>hljs.highlightAll();</script>\n</body>\n</html>\n")
+}
+
+// renderOpts controls how a sequence of messages is rendered to HTML. The
+// same renderer is used for the top-level conversation and for nested
+// subagent transcripts.
+type renderOpts struct {
+	UserLabel      string                // "you" for main convo, "task" for subagent
+	CollapseLabels bool                  // collapse consecutive same-role labels (main only)
+	ToolMap        map[string]t.ToolCall // tool calls indexed by ID
+	ExpandSubagent bool                  // recurse into RoleTool subagent SubMessages
+}
+
+func writeHTMLHead(w io.Writer, title string, sess *Session) {
 	fmt.Fprintf(w, `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -113,121 +137,127 @@ func ExportHTML(sess *Session, w io.Writer) {
 		html.EscapeString(sess.Model),
 		html.EscapeString(sess.StartedAt.Format("2006-01-02 15:04")),
 	)
+}
 
-	// Build a map of tool call ID → t.ToolCall for labeling tool results
-	toolCallMap := map[string]t.ToolCall{}
-	for _, m := range sess.Messages {
+// buildToolCallMap indexes a message slice by tool call ID for fast lookup
+// when rendering tool results.
+func buildToolCallMap(msgs []t.Message) map[string]t.ToolCall {
+	out := map[string]t.ToolCall{}
+	for _, m := range msgs {
 		for _, tc := range m.ToolCalls {
-			toolCallMap[tc.ID] = tc
+			out[tc.ID] = tc
 		}
 	}
+	return out
+}
 
-	// For collapsing consecutive labels: track the "display role" of the previous message.
-	// Assistant and tool messages share the same display role ("fin").
-	displayRole := func(r t.Role) string {
-		switch r {
-		case t.RoleAssistant, t.RoleTool:
-			return "fin"
-		case t.RoleUser:
-			return "you"
-		case t.RoleSystem:
-			return "system"
-		default:
-			return string(r)
-		}
+// displayRole maps a message role to its visual label. Assistant and tool
+// messages collapse to one display role ("fin") so consecutive labels can
+// be hidden in the main conversation.
+func displayRole(r t.Role) string {
+	switch r {
+	case t.RoleAssistant, t.RoleTool:
+		return "fin"
+	case t.RoleUser:
+		return "you"
+	case t.RoleSystem:
+		return "system"
+	default:
+		return string(r)
 	}
+}
 
+// renderMessageList iterates messages and emits HTML per opts. Returns
+// nothing — the renderer is purely side-effecting on w.
+func renderMessageList(w io.Writer, msgs []t.Message, opts renderOpts) {
 	prevDisplay := ""
-	msgs := sess.Messages
-	for i, m := range msgs {
-		ts := ""
-		if !m.Timestamp.IsZero() {
-			ts = m.Timestamp.Format("15:04:05")
-		}
+	for _, m := range msgs {
+		prevDisplay = renderMessage(w, m, opts, prevDisplay)
+	}
+}
 
-		curDisplay := displayRole(m.Role)
-		// Check if next message has the same display role
-		nextDisplay := ""
-		for j := i + 1; j < len(msgs); j++ {
-			nextDisplay = displayRole(msgs[j].Role)
-			break
-		}
-		showLabel := curDisplay != prevDisplay
-		_ = nextDisplay
-		gap := ""
-		if showLabel && prevDisplay != "" {
-			gap = " msg-gap"
-		}
+// renderMessage renders a single message and returns the updated previous
+// display role used for label collapsing on the next call.
+func renderMessage(w io.Writer, m t.Message, opts renderOpts, prevDisplay string) string {
+	ts := ""
+	if !m.Timestamp.IsZero() {
+		ts = m.Timestamp.Format("15:04:05")
+	}
 
-		switch m.Role {
-		case t.RoleSystem:
-			fmt.Fprintf(w, `<div class="msg role-system%s">`, gap)
-			fmt.Fprintf(w, `<details><summary class="msg-role">system</summary>`)
-			fmt.Fprintf(w, `<div class="msg-content">%s</div></details></div>`+"\n", html.EscapeString(m.Content))
+	curDisplay := displayRole(m.Role)
+	showLabel := !opts.CollapseLabels || curDisplay != prevDisplay
+	gap := ""
+	if opts.CollapseLabels && showLabel && prevDisplay != "" {
+		gap = " msg-gap"
+	}
 
-		case t.RoleUser:
-			fmt.Fprintf(w, `<div class="msg role-user%s">`, gap)
-			if showLabel {
-				fmt.Fprint(w, `<div class="msg-role">you`)
-				if ts != "" {
-					fmt.Fprintf(w, `<span class="msg-time">%s</span>`, ts)
-				}
-				fmt.Fprint(w, `</div>`)
+	switch m.Role {
+	case t.RoleSystem:
+		fmt.Fprintf(w, `<div class="msg role-system%s">`, gap)
+		fmt.Fprint(w, `<details><summary class="msg-role">system</summary>`)
+		fmt.Fprintf(w, `<div class="msg-content">%s</div></details></div>`+"\n", html.EscapeString(m.Content))
+
+	case t.RoleUser:
+		fmt.Fprintf(w, `<div class="msg role-user%s">`, gap)
+		if showLabel {
+			fmt.Fprintf(w, `<div class="msg-role">%s`, html.EscapeString(opts.UserLabel))
+			if ts != "" && opts.CollapseLabels {
+				fmt.Fprintf(w, `<span class="msg-time">%s</span>`, ts)
 			}
-			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
+			fmt.Fprint(w, `</div>`)
+		}
+		fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
 
-		case t.RoleAssistant:
-			// Always show label when switching from user to fin, even if content is empty
-			if showLabel && (m.Content != "" || len(m.ToolCalls) > 0) {
-				fmt.Fprintf(w, `<div class="msg role-assistant%s">`, gap)
+	case t.RoleAssistant:
+		hasBody := m.Content != "" || len(m.ToolCalls) > 0
+		if showLabel && hasBody {
+			fmt.Fprintf(w, `<div class="msg role-assistant%s">`, gap)
+			if opts.CollapseLabels {
 				fmt.Fprint(w, `<div class="msg-role">fin`)
 				if ts != "" {
 					fmt.Fprintf(w, `<span class="msg-time">%s</span>`, ts)
 				}
 				fmt.Fprint(w, `</div>`)
-				if m.Content != "" {
-					fmt.Fprintf(w, `<div class="msg-content">%s</div>`, renderMarkdown(m.Content))
-				}
-				fmt.Fprint(w, "</div>\n")
-			} else if m.Content != "" {
-				fmt.Fprintf(w, `<div class="msg role-assistant">`)
-				fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
 			}
-			for _, tc := range m.ToolCalls {
-				if tc.Name == "edit" || tc.Name == "write" {
-					fmt.Fprint(w, `<div class="msg role-tool">`)
-					renderToolCall(w, tc)
-					fmt.Fprint(w, "</div>\n")
-				}
-			}
-
-		case t.RoleTool:
-			fmt.Fprint(w, `<div class="msg role-tool">`)
-			if tc, ok := toolCallMap[m.ToolCallID]; ok {
-				if tc.Name == "edit" || tc.Name == "write" {
-					fmt.Fprint(w, "</div>\n")
-					prevDisplay = curDisplay
-					continue
-				}
-				summary := toolCallSummary(tc.Name, tc.Arguments)
-				if tc.Name == "subagent" && len(m.SubMessages) > 0 {
-					fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">subagent</span> %s</summary>`,
-						html.EscapeString(summary))
-					renderSubagentConversation(w, m.SubMessages)
-					fmt.Fprint(w, `</details>`)
-				} else {
-					renderToolResult(w, tc, summary, m.Content)
-				}
-			} else {
-				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
+			if m.Content != "" {
+				fmt.Fprintf(w, `<div class="msg-content">%s</div>`, renderMarkdown(m.Content))
 			}
 			fmt.Fprint(w, "</div>\n")
+		} else if m.Content != "" {
+			fmt.Fprint(w, `<div class="msg role-assistant">`)
+			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.Name == "edit" || tc.Name == "write" {
+				fmt.Fprint(w, `<div class="msg role-tool">`)
+				renderToolCall(w, tc)
+				fmt.Fprint(w, "</div>\n")
+			}
 		}
 
-		prevDisplay = curDisplay
+	case t.RoleTool:
+		fmt.Fprint(w, `<div class="msg role-tool">`)
+		if tc, ok := opts.ToolMap[m.ToolCallID]; ok {
+			if tc.Name == "edit" || tc.Name == "write" {
+				fmt.Fprint(w, "</div>\n")
+				return curDisplay
+			}
+			summary := toolCallSummary(tc.Name, tc.Arguments)
+			if opts.ExpandSubagent && tc.Name == "subagent" && len(m.SubMessages) > 0 {
+				fmt.Fprintf(w, `<details><summary class="tool-call"><span class="tool-name">subagent</span> %s</summary>`,
+					html.EscapeString(summary))
+				renderSubagentConversation(w, m.SubMessages)
+				fmt.Fprint(w, `</details>`)
+			} else {
+				renderToolResult(w, tc, summary, m.Content)
+			}
+		} else {
+			fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
+		}
+		fmt.Fprint(w, "</div>\n")
 	}
 
-	fmt.Fprint(w, "<script>hljs.highlightAll();</script>\n</body>\n</html>\n")
+	return curDisplay
 }
 
 func renderToolCall(w io.Writer, tc t.ToolCall) {
@@ -279,97 +309,42 @@ func renderToolCall(w io.Writer, tc t.ToolCall) {
 		html.EscapeString(tc.Name), html.EscapeString(summary))
 }
 
-// renderSubagentConversation renders a subagent's full message history inside a container.
+// renderSubagentConversation renders a subagent's full message history inside
+// a styled container. Reuses renderMessageList with a subagent-flavored
+// renderOpts (no label collapsing, "task" user label, no nested subagent
+// expansion).
 func renderSubagentConversation(w io.Writer, msgs []t.Message) {
-	// Build tool call map for this subagent's messages
-	subToolCallMap := map[string]t.ToolCall{}
-	for _, m := range msgs {
-		for _, tc := range m.ToolCalls {
-			subToolCallMap[tc.ID] = tc
-		}
-	}
-
 	fmt.Fprint(w, `<div class="subagent">`)
 	fmt.Fprint(w, `<div class="subagent-label">subagent</div>`)
 
-	for _, m := range msgs {
-		switch m.Role {
-		case t.RoleSystem:
-			fmt.Fprint(w, `<div class="msg role-system">`)
-			fmt.Fprint(w, `<details><summary class="msg-role">system</summary>`)
-			fmt.Fprintf(w, `<div class="msg-content">%s</div></details></div>`+"\n", html.EscapeString(m.Content))
-
-		case t.RoleUser:
-			fmt.Fprint(w, `<div class="msg role-user">`)
-			fmt.Fprint(w, `<div class="msg-role">task</div>`)
-			fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
-
-		case t.RoleAssistant:
-			if m.Content != "" {
-				fmt.Fprint(w, `<div class="msg role-assistant">`)
-				fmt.Fprintf(w, `<div class="msg-content">%s</div></div>`+"\n", renderMarkdown(m.Content))
-			}
-			for _, tc := range m.ToolCalls {
-				if tc.Name == "edit" || tc.Name == "write" {
-					fmt.Fprint(w, `<div class="msg role-tool">`)
-					renderToolCall(w, tc)
-					fmt.Fprint(w, "</div>\n")
-				}
-			}
-
-		case t.RoleTool:
-			fmt.Fprint(w, `<div class="msg role-tool">`)
-			if tc, ok := subToolCallMap[m.ToolCallID]; ok {
-				if tc.Name == "edit" || tc.Name == "write" {
-					fmt.Fprint(w, "</div>\n")
-					continue
-				}
-				summary := toolCallSummary(tc.Name, tc.Arguments)
-				renderToolResult(w, tc, summary, m.Content)
-			} else {
-				fmt.Fprintf(w, `<div class="tool-result">%s</div>`, html.EscapeString(m.Content))
-			}
-			fmt.Fprint(w, "</div>\n")
-		}
+	opts := renderOpts{
+		UserLabel:      "task",
+		CollapseLabels: false,
+		ToolMap:        buildToolCallMap(msgs),
+		ExpandSubagent: false,
 	}
+	renderMessageList(w, msgs, opts)
 
 	fmt.Fprint(w, `</div>`)
 }
 
+// toolCallSummary returns the plain-text subject line shown next to a tool
+// call in the HTML export. Wraps tool.LabelFor and falls back to
+// "key=value..." for tools without a registered labeler.
 func toolCallSummary(name, argsJSON string) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return ""
 	}
-	switch name {
-	case "shell":
-		cmd, _ := args["command"].(string)
-		return "$ " + cmd
-	case "read":
-		path, _ := args["path"].(string)
-		return path
-	case "write":
-		path, _ := args["path"].(string)
-		return path
-	case "edit":
-		path, _ := args["path"].(string)
-		return path
-	case "use_skill":
-		s, _ := args["name"].(string)
-		return s
-	case "subagent":
-		task, _ := args["task"].(string)
-		if len(task) > 80 {
-			task = task[:80] + "…"
-		}
-		return task
-	default:
-		parts := make([]string, 0)
-		for k, v := range args {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-		}
-		return strings.Join(parts, " ")
+	label := tool.LabelFor(name, args)
+	if label.Primary != "" {
+		return label.Primary
 	}
+	parts := make([]string, 0, len(args))
+	for k, v := range args {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	return strings.Join(parts, " ")
 }
 
 // renderToolResult renders a tool result as a collapsible block, with syntax highlighting for read tools.

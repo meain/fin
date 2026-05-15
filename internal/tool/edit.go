@@ -20,6 +20,18 @@ func (et *EditTool) Description() string {
 	return "Edit a file by replacing an exact string match. The old_string must appear exactly once in the file. Use this for surgical edits rather than rewriting entire files."
 }
 
+func (et *EditTool) Label(args map[string]any) ToolLabel {
+	path, _ := args["path"].(string)
+	old, _ := args["old_string"].(string)
+	nw, _ := args["new_string"].(string)
+	oldLines := strings.Count(old, "\n") + 1
+	newLines := strings.Count(nw, "\n") + 1
+	return ToolLabel{
+		Primary: path,
+		Detail:  fmt.Sprintf("-%d +%d", oldLines, newLines),
+	}
+}
+
 func (et *EditTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -77,29 +89,45 @@ func (et *EditTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	return t.ToolResult{Content: fmt.Sprintf("edited %s", path)}, nil
 }
 
-// nearMissHint checks if old_string matches after normalizing whitespace.
-// If so, it returns a hint showing the whitespace difference.
+// nearMissHint diagnoses a Replace failure: when old_string doesn't match
+// exactly, return a hint pointing at whitespace differences (or just confirm
+// the content exists modulo whitespace).
 func nearMissHint(content, oldStr string) string {
-	normalized := normalizeWhitespace(oldStr)
 	lines := strings.Split(content, "\n")
-
-	// Try to find a contiguous block of lines that matches old_string
-	// after whitespace normalization
 	oldLines := strings.Split(oldStr, "\n")
-	if len(oldLines) == 0 {
-		return ""
+
+	if start, ok := findWhitespaceMatch(lines, oldLines); ok {
+		actual := strings.Join(lines[start:start+len(oldLines)], "\n")
+		if actual != oldStr {
+			return fmt.Sprintf(
+				" (whitespace mismatch — use the exact string from the file)\nexpected:\n%s\nactual:\n%s",
+				quoted(oldStr), quoted(actual),
+			)
+		}
 	}
 
+	if strings.Contains(normalizeWhitespace(content), normalizeWhitespace(oldStr)) {
+		return " (content exists but whitespace differs — re-read the file and copy the exact string)"
+	}
+
+	return ""
+}
+
+// findWhitespaceMatch searches lines for a contiguous block matching oldLines
+// after whitespace normalization. Returns the starting index and true on
+// match.
+func findWhitespaceMatch(lines, oldLines []string) (int, bool) {
+	if len(oldLines) == 0 {
+		return 0, false
+	}
 	firstNorm := normalizeWhitespace(oldLines[0])
 	if firstNorm == "" {
-		return ""
+		return 0, false
 	}
-
 	for i, line := range lines {
 		if normalizeWhitespace(line) != firstNorm {
 			continue
 		}
-		// Check if subsequent lines match
 		if i+len(oldLines) > len(lines) {
 			continue
 		}
@@ -110,27 +138,11 @@ func nearMissHint(content, oldStr string) string {
 				break
 			}
 		}
-		if !match {
-			continue
+		if match {
+			return i, true
 		}
-
-		// Found a whitespace-normalized match — show the diff
-		actual := strings.Join(lines[i:i+len(oldLines)], "\n")
-		if actual == oldStr {
-			continue // exact match means Count should have found it; skip
-		}
-		return fmt.Sprintf(
-			" (whitespace mismatch — use the exact string from the file)\nexpected:\n%s\nactual:\n%s",
-			quoted(oldStr), quoted(actual),
-		)
 	}
-
-	// No whitespace match either — check if the non-whitespace content exists at all
-	if strings.Contains(normalizeWhitespace(content), normalized) {
-		return " (content exists but whitespace differs — re-read the file and copy the exact string)"
-	}
-
-	return ""
+	return 0, false
 }
 
 func normalizeWhitespace(s string) string {

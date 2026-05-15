@@ -17,6 +17,14 @@ type SubagentTool struct {
 
 func (s *SubagentTool) Name() string { return "subagent" }
 
+func (s *SubagentTool) Label(args map[string]any) ToolLabel {
+	task, _ := args["task"].(string)
+	if len(task) > 60 {
+		task = task[:60] + "…"
+	}
+	return ToolLabel{Primary: task}
+}
+
 func (s *SubagentTool) Description() string {
 	return "Delegate a task to an isolated subagent. The subagent gets its own conversation with the same tools but no shared history. Use this for focused subtasks that benefit from a clean context."
 }
