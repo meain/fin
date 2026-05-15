@@ -7,17 +7,19 @@ Opinionated CLI agent harness in Go
 ## Features
 
 - **Multi-provider support**: Anthropic Claude, OpenAI, and any OpenAI-compatible APIs via raw HTTP
-- **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees
+- **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees, subagents, conversation compaction
 - **Agent skills**: [agentskills.io](https://agentskills.io) spec — progressive disclosure, project and global skills
-- **Session persistence**: Incremental saves, resume, named sessions (`-n`), export as JSON/HTML/message, auto-generated titles via secondary model
-- **Session matching**: `-match` searches recent sessions by keyword relevance and offers to continue one
+- **Session persistence**: Incremental JSONL saves, resume, named sessions (`-n`), prefix-match UUIDs, export as JSON/HTML/message, auto-generated titles via secondary model
+- **Session matching**: `-match` searches recent sessions by keyword relevance (title-weighted + recency-decayed) and offers to continue one
 - **Prompt caching**: Anthropic system prompt and tool definitions cached automatically
-- **Token usage**: Input/output token counts and cache stats displayed after each run
+- **Token usage**: Input/output token counts and cache stats displayed in debug mode
 - **Piped input**: `git diff | fin "review this"`
 - **Shebang scripts**: `#!/usr/bin/env -S fin -f` — make prompt files executable
-- **Output modes**: Default (full ANSI), minimal (one-line tool summaries), quiet (stdout only)
+- **Output modes**: `default` (ANSI, streaming, parallel tool UI), `debug` (adds turn timings, token usage), `quiet` (stdout only for scripting)
+- **Tool selection**: `-tools` restricts the active tool set (`all`, `none`, or `read,shell,...`)
 - **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
 - **Retry with backoff**: Automatic retry on rate limits and server errors
+- **Replaceable UI**: agent talks to the UI through a small interface — a TUI, web, or audio frontend can drop in without touching the agent
 
 ## Installation
 
@@ -57,8 +59,14 @@ fin -yolo "refactor this file"
 fin --max-turns 3 "quick summary of this repo"
 
 # Output modes
-fin -ui minimal "what is in go.mod"   # compact tool display
-fin -ui quiet "summarize this file"   # only response text on stdout
+fin -ui debug "what is in go.mod"     # default + turn timings + token usage
+fin -ui quiet "summarize this file"   # only response text on stdout (good for scripting)
+
+# Tool restrictions
+fin -tools read,shell "list go files"   # only enable read and shell
+fin -tools none "what can you do"       # no tools, just chat
+fin -approve safe "fix the bug"         # auto-approve safe tools, prompt for destructive ones
+fin --max-turns 3 "quick summary"       # cap agent loop iterations
 
 # Piped input
 git diff | fin "review this diff"
@@ -73,11 +81,11 @@ echo "extra context" | fin -f prompt.txt     # file prompt + piped stdin
 
 ### Examples
 
-Minimal mode shows tool names, their key argument, and line counts:
+Default mode streams the response while tool calls run in parallel:
 
 ```
 $ fin "what is in go.mod? be brief"
-read go.mod (14 lines)
+read go.mod
 Go 1.25.7, minimal deps: BurntSushi/toml, google/uuid, yuin/goldmark, golang.org/x/term, gopkg.in/yaml.v3.
 ```
 
@@ -136,7 +144,13 @@ secondary = "anthropic/claude-haiku-4-5"  # used for secondary tasks like title 
 project_file = "AGENTS.md"   # per-project instructions file
 max_turns = 50                # max agent loop iterations
 approve = "safe"              # tool approval: "all", "safe", "none"
-ui = "default"                # "default", "minimal", or "quiet"
+ui = "default"                # "default", "debug", or "quiet"
+
+[settings.matching]
+title_weight = 3              # weight for title hits in -match (default 3)
+content_cap = 5               # cap on content hits per keyword (default 5)
+recency_decay_d = 7           # recency decay window in days (default 7)
+recency_bonus = 0.5           # max recency bonus multiplier (default 0.5)
 
 [model_aliases]
 sonnet = "anthropic/claude-sonnet-4-20250514"
@@ -170,9 +184,11 @@ deny = ["rm -rf *", "sudo *"]
 
 - **read**: Read files (with line ranges), images (png/jpg/gif/webp for vision), or directory trees
 - **write**: Create or overwrite files (creates parent directories)
-- **edit**: Exact string replacement in files (old_string must be unique)
-- **shell**: Execute commands via `sh -c` (stdout and stderr returned separately)
+- **edit**: Exact string replacement in files (old_string must be unique, with whitespace-mismatch hints)
+- **shell**: Execute commands via `sh -c` (stdout and stderr returned separately, line-count streaming)
 - **use_skill**: Activate agent skills for specialized workflows
+- **subagent**: Spawn an isolated child agent for a focused task (fresh conversation, same tools minus subagent)
+- **compact**: Summarize the conversation into a new session and drop older context
 
 ## Skills
 
@@ -195,7 +211,9 @@ The system prompt is assembled from layers:
 
 ## Session Storage
 
-Sessions are saved incrementally to `~/.local/share/fin/sessions/` as JSON files. Each session has a UUID, auto-generated title, and per-message timestamps. Sessions are saved after every agent turn so nothing is lost if killed mid-execution. Named sessions (`-n`) use a human-readable name embedded in the filename for fast lookup.
+Sessions are saved incrementally to `~/.local/share/fin/sessions/` as JSONL files. The first line is a session header (id, title, model, cwd, started_at); each subsequent line is one message. Writes are append-only after the first save; header changes (e.g. LLM-generated title) trigger an atomic `tmp + rename` full rewrite. mtime conflict detection refuses to clobber the file if another `fin` process has written to it since load.
+
+Named sessions (`-n`) embed a human-readable name in the filename for fast lookup. UUID-based lookup works with any prefix (`fin -s abc12`).
 
 If `models.secondary` is configured, session titles are automatically generated by the secondary model after each conversation. Without it, the first user message (truncated to 50 chars) is used as the title.
 

@@ -4,72 +4,132 @@ Opinionated CLI agent harness in Go. Minimal dependencies, raw HTTP to LLM provi
 
 ## Architecture
 
-Root package (`main`) handles CLI, agent loop, config, sessions, UI. Internal packages hold the reusable parts.
+`main.go` is a 10-LOC entry point that calls `cli.Run()`. Everything else lives under `internal/`. The agent never references the UI directly — all rendering goes through `agent.UIWriter`, which the terminal `ui` package implements. A future TUI or web frontend can swap in by implementing the same interface.
 
-### Root files
-- `main.go` — Entry point, flag parsing, session management, piped stdin
-- `agent.go` — Agent loop (stream → tool calls → execute → repeat), retry with backoff, tool approval
-- `config.go` — TOML config (`~/.config/fin/config.toml`), model alias resolution, validation
-- `prompt.go` — System prompt assembly (embedded base + runtime context + skills + AGENTS.md layers)
-- `session.go` — Incremental session persistence with UUID, title, named sessions, per-message timestamps
-- `matching.go` — Session auto-matching: keyword extraction, scoring (title 3x + content + recency), `FindMatchingSessions`
-- `export.go` — Export as JSON, HTML (markdown rendering, foldable tool results, edit diffs), or last message
-- `skill.go` — Skill discovery from .agents/skills/ (project + parents + global), follows symlinks, YAML frontmatter
-- `ui.go` — Terminal output: 3 modes (default/minimal/quiet), ANSI colors, live progress, line counts
-- `input.go` — x/term raw mode, stdin multiplexer for type-ahead during execution, Esc/Ctrl+C cancellation
-- `embed.go` — Embeds `system_prompt.md` and `skills/` directory
+```
+main.go                              # os.Exit(cli.Run())
+internal/
+  cli/         cli.go                # flag parsing, session glue, the user-turn driver, -sessions/-export/-match dispatch
+  agent/       agent.go              # Agent type, New(), AddUserMessage, Messages, SetMessages
+               loop.go               # run(), runTurn, approveAll, runToolsParallel, detectCompactSummary, appendToolResults, consumeStream, approveTool
+               retry.go              # streamWithRetry, retryDelay (exponential backoff + jitter on 429/5xx)
+               title.go              # GenerateTitle via Models.Secondary
+               subagent.go           # runSubagent (fresh convo, nullUI, subagent tool callback)
+               tools.go              # BuildTools(skills, enabled, includeSubagent), filterTools, loadBuiltinSkills
+               provider_factory.go   # NewProviderInjector (wraps provider w/ fixed model), newProviderForModel
+               uiwriter.go           # UIWriter interface + Debug* payloads + SessionInfoData + RetryData + nullUI
+  ui/          ui.go                 # Terminal UIWriter impl: ANSI codes, cursor moves, parallel-tool state, debug renderer, approval prompt
+  export/      export.go             # JSON, HTML (with markdown rendering, foldable tool results, edit diffs), shared renderMessage for main + subagent
+  session/     session.go            # Session, sessionHeader (twin kept — append perf), TitleFromFirstMessage, LastMessageTime
+               writer.go             # Writer, NewWriter, WriterForExisting, Save, fullRewrite, appendNew, ErrConflict (mtime guard)
+               reader.go             # readFile (tolerates truncated trailing line), parseFiles (parallel), uuidFromFilename
+               store.go              # entries, LoadByID/Index/Name/Last, LoadSummaries, SummariesJSON, ParseSince
+               match.go              # FindMatching, scoreSession, extractKeywords, stopWords
+  skill/       skill.go              # Skill, ParseMD, Discover (walks up cwd, then ~), scanDir
+  prompt/      prompt.go             # BuildSystem (gates base prompt by enabled tools)
+               project.go            # readAgentsMD, findProjectFile (uses fsutil.WalkUpFromCwd)
+  config/      config.go             # Config + sub-structs, Default, Load, validate, applyMatchingDefaults
+               resolve.go            # ResolveModel (alias chain + provider/model split)
+               paths.go              # HomeDir, ConfigPath, SessionPath, AgentsDir/File, SkillFile, SkillsDirName
+  approval/    approval.go           # Approval, Build, AutoApprove, ForSubagent (subagent restriction in safe mode)
+  input/       input.go              # x/term raw mode, stdin multiplexer, Esc/Ctrl+C cancel — consumed only by ui
+  render/      ansi.go               # ANSI vars + Disable()
+               text.go               # forEachVisibleRune, VisibleLen, Truncate
+               time.go               # FormatElapsed, RelativeTime
+               usage.go              # FormatUsage
+  fsutil/      walkup.go             # WalkUpFromCwd
+               expand.go             # ExpandHome
+  embed/       embed.go              # //go:embed of system_prompt.md, skills/, hljs.* (all assets live here)
+  provider/    provider.go           # Provider, Stream, Config, New, APIError
+               anthropic.go          # SSE-streaming Anthropic impl; Recv split per event with decodeOrSkip[T]
+               openai.go             # Newline-delimited OpenAI-compatible impl
+  tool/        tool.go               # Tool interface, BuiltinTools, SubagentTools, Find, Defs
+               label.go              # ToolLabel{Primary, Detail}, Labeler interface, LabelFor (used by ui + export)
+               read.go, write.go, edit.go, shell.go, skill.go, subagent.go, compact.go
+  types/       types.go              # Message, ToolCall, ToolCallDelta, StreamDelta, Usage, CompletionRequest, ToolDef, ToolResult, Image, Role
+```
 
-### Internal packages
-- `internal/types/` — Shared types: Message, ToolCall, StreamDelta, Usage, CompletionRequest, ToolDef, ToolResult, Image, ExpandHome
-- `internal/provider/` — Provider interface + Anthropic (raw HTTP + SSE) and OpenAI-compatible implementations
-- `internal/tool/` — Tool interface + read, write, edit, shell, skill tools
+### Dependency graph (acyclic)
 
-### Embedded files
-- `system_prompt.md` — Base system prompt
-- `skills/about_fin/SKILL.md` — Builtin skill describing fin itself. **Keep this in sync** when adding/removing user-visible features (new tools, flags, persistence changes, config keys, output modes, etc.) — it is loaded into the LLM's context to answer "what is fin / what can fin do" questions, so stale entries actively mislead.
+```
+types  embed  fsutil  render          (leaves)
+config → fsutil
+input  → render
+approval → config
+skill  → config, fsutil
+prompt → skill, embed, config, fsutil
+tool   → types
+provider → types
+session → types, config
+agent  → types, provider, tool, approval, prompt, skill, config, embed
+export → types, session, tool, embed
+ui     → types, render, input, tool, agent      (for Debug* payload types only)
+cli    → all of the above except types/render/fsutil leaves
+main   → cli
+```
+
+`agent` does not import `ui`/`input`/`export`/`session`. `session` and `export` do not import `ui`. Enforced by:
+
+```
+go list -deps ./internal/agent | grep -E 'internal/(ui|input|export|session)'   # zero hits
+go list -deps ./internal/session | grep internal/ui                              # zero hits
+grep -rn '"\\033\[' --include='*.go' | grep -v 'internal/(render|ui|input)'      # zero hits
+```
+
+### Embedded assets
+
+Live under `internal/embed/`:
+- `system_prompt.md` — base system prompt
+- `skills/about_fin/SKILL.md` — builtin skill describing fin itself. **Keep in sync** when adding/removing user-visible features — it is loaded into the LLM's context to answer "what is fin / what can fin do" questions; stale entries actively mislead.
+- `hljs.min.js`, `hljs.min.css` — bundled into HTML export
 
 ## Conventions
 
 - Raw HTTP for all LLM providers — no provider SDKs
 - Minimal deps: `BurntSushi/toml`, `google/uuid`, `gopkg.in/yaml.v3`, `yuin/goldmark`, `golang.org/x/term`
-- Tools return `ToolResult` (Content + optional Images)
+- Tools return `types.ToolResult` (Content + optional Images + optional SubMessages)
 - Types shared across packages live in `internal/types/`
-- `types.ExpandHome()` handles `~/` paths — use it in tools that accept file paths
+- `fsutil.ExpandHome()` handles `~/` paths — use in tools that accept file paths
 - Piped stdin is detected and prepended to the prompt
 - Rate limits (429) and server errors (5xx) retried with exponential backoff + jitter (max 3)
-- All terminal output must go through the UI layer (`ui.go`) — never `fmt.Fprintf(os.Stderr, ...)` directly
-- Never send pre-formatted complex data to the UI — pass structured types (e.g. `DebugData`, `RetryData`, `SessionInfoData`) and let the UI layer render. The UI must be replaceable (web, audio, etc.) so callers must not make formatting decisions. Simple static strings for `Info`/`Error` are fine.
-- ANSI escape codes directly — no color/TUI libraries
-- System prompt and builtin skills are embedded markdown files
+- **UI swappability**: agent talks to UI only through `agent.UIWriter`. Payloads crossing the boundary are structured data — no ANSI escapes, no pre-formatted strings, no terminal-width assumptions. `tool.ToolLabel` is data; ui renders. `Debug*` types, `SessionInfoData`, `RetryData` are structured. A future web UI implements the same interface; no agent change needed.
+- ANSI escape sequences live **only** in `internal/render`, `internal/ui`, `internal/input`. Any other package emitting `\033[` is a layering bug.
+- All terminal output from the agent flows through `UIWriter`. Pre-UI setup errors in `cli` may still write to stderr directly (no UI exists yet).
+- ANSI escape codes used directly — no color/TUI libraries
+- System prompt and builtin skills are embedded markdown files in `internal/embed/`
 
 ## CLI flags
 
 ```
 fin "prompt"                    # run with prompt
 fin -c "follow up"              # continue last session
-fin -s <uuid> "follow up"      # continue specific session (prefix match)
+fin -s <uuid> "follow up"       # continue specific session (prefix match or numeric index)
 fin -n <name> "prompt"          # named session (resumes if exists, creates if not)
-fin -sessions                   # list last 10 sessions
+fin -sessions                   # list last 10 sessions (JSON if piped, ANSI table on TTY)
 fin -all -sessions              # list all sessions
+fin -since 1h -sessions         # filter sessions by age (1h, 2d, 1w, 30m)
 fin -export json|html|message   # export session (uses -s/-n for specific, else last)
-fin -model provider/model       # override model
+fin -model provider/model       # override model (alias names from [model_aliases] work)
 fin -ui default|debug|quiet     # output mode
 fin -approve all                # auto-approve all tools (also: safe, none)
 fin -yolo                       # alias for -approve all
 fin -match "prompt"             # search recent sessions, offer to continue matching one
-fin --max-turns 5 "prompt"     # limit agent loop iterations (overrides config)
+fin --max-turns 5 "prompt"      # limit agent loop iterations (overrides config)
 fin -f script.fin               # read prompt from file (strips shebang line)
 fin -f script.fin "extra args"  # file prompt + positional args appended
 fin -tools read,shell "prompt"  # restrict tool set (all, none, or comma list)
+fin -color auto|always|never    # color output
+fin -config <path>              # override config file path
 ```
 
 ## Config
 
 TOML at `~/.config/fin/config.toml`:
 
-- `[models]` — `primary` (main conversation model), `secondary` (secondary tasks like title generation)
+- `[models]` — `primary` (main conversation model), `secondary` (title generation and any secondary tasks)
 - `[settings]` — `project_file`, `max_turns`, `approve`, `ui`
-- `[model_aliases]` — short names mapping to `provider/model`
+- `[settings.matching]` — `title_weight` (default 3), `content_cap` (default 5), `recency_decay_d` (default 7), `recency_bonus` (default 0.5)
+- `[model_aliases]` — short names mapping to `provider/model` (alias chains resolved up to 10 hops)
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`
 - `[tools.*]` — `approval` (auto/confirm/deny), `allow`/`deny` glob patterns for shell
 
@@ -77,20 +137,20 @@ TOML at `~/.config/fin/config.toml`:
 
 1. Create `internal/provider/name.go` implementing the `Provider` interface
 2. Add a case in `New()` in `internal/provider/provider.go`
-3. The provider must handle SSE streaming and convert to/from `types.Message` / `types.StreamDelta`
+3. Provider handles streaming (SSE or NDJSON or whatever the upstream uses) and converts to/from `types.Message` / `types.StreamDelta`
 
 ## Adding a new tool
 
 1. Create `internal/tool/name.go` implementing the `Tool` interface (Name, Description, Parameters, Run returning ToolResult)
 2. Add it to `BuiltinTools()` in `internal/tool/tool.go`
-3. Add a default approval level in `defaultConfig()` in `config.go`
-4. Add display handling in `ToolCallStart` and `toolCallMinimal` in `ui.go`
-5. If it needs special HTML export rendering, add handling in `renderToolCall` in `export.go`
+3. Add a default approval level in `Default()` in `internal/config/config.go`
+4. If the tool has a non-trivial display, implement `Labeler` (returns `ToolLabel{Primary, Detail}`) and register it in `labelers` in `internal/tool/label.go`. Both terminal UI and HTML export pick this up automatically.
+5. If it needs special HTML export rendering, add handling in `renderToolCall` in `internal/export/export.go`
 
 ## Adding a builtin skill
 
-1. Create `skills/<name>/SKILL.md` with YAML frontmatter (name, description) and markdown body
-2. It gets embedded automatically via `embed.go` and loaded in `agent.go`'s `loadBuiltinSkills()`
+1. Create `internal/embed/skills/<name>/SKILL.md` with YAML frontmatter (name, description) and markdown body
+2. It's embedded automatically via `internal/embed/embed.go` and loaded by `agent.loadBuiltinSkills`
 
 ## Generating the demo GIF
 
@@ -122,7 +182,7 @@ This avoids bloating the repo with a multi-MB binary on every regen.
 Use sessions to review how fin handled a task and identify agent behavior issues:
 
 ```
-go run . -all -sessions              # list all sessions (grep to find by keyword)
+go run . -all -sessions                  # list all sessions
 go run . -s <uuid-prefix> -export json   # export full conversation as JSON
 go run . -s <uuid-prefix> -export html   # export as readable HTML (good for sharing)
 ```
