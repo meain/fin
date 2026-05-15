@@ -12,8 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/meain/fin/internal/approval"
+	"github.com/meain/fin/internal/config"
 	finembed "github.com/meain/fin/internal/embed"
+	"github.com/meain/fin/internal/prompt"
 	"github.com/meain/fin/internal/provider"
+	"github.com/meain/fin/internal/skill"
 	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
 )
@@ -42,10 +46,10 @@ type Agent struct {
 	provider provider.Provider
 	model    string // model name for tagging assistant messages
 	tools     []tool.Tool
-	config    *Config
-	approval  *toolApproval
+	config    *config.Config
+	approval  *approval.Approval
 	ui        UIWriter
-	skills    []*Skill
+	skills    []*skill.Skill
 	sessionID string
 	enabled   map[string]bool // tool filter; nil = all enabled, empty = none
 	messages  []t.Message
@@ -54,9 +58,9 @@ type Agent struct {
 	OnCompact func() // called when conversation is compacted into a new session
 }
 
-func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill, sessionID string, enabled map[string]bool) *Agent {
+func NewAgent(p provider.Provider, model string, config *config.Config, approval *approval.Approval, ui UIWriter, skills []*skill.Skill, sessionID string, enabled map[string]bool) *Agent {
 	tools := buildTools(skills, enabled)
-	systemPrompt := buildSystemPrompt(config, skills, sessionID, enabled)
+	systemPrompt := prompt.BuildSystem(config, skills, sessionID, enabled)
 
 	a := &Agent{
 		provider:  p,
@@ -84,7 +88,7 @@ func NewAgent(p provider.Provider, model string, config *Config, approval *toolA
 	return a
 }
 
-func buildTools(skills []*Skill, enabled map[string]bool) []tool.Tool {
+func buildTools(skills []*skill.Skill, enabled map[string]bool) []tool.Tool {
 	tools := tool.BuiltinTools()
 
 	entries := loadBuiltinSkills()
@@ -130,18 +134,18 @@ func loadBuiltinSkills() []tool.SkillEntry {
 		if !d.IsDir() {
 			continue
 		}
-		data, err := finembed.BuiltinSkillsFS.ReadFile("skills/" + d.Name() + "/" + skillFile)
+		data, err := finembed.BuiltinSkillsFS.ReadFile("skills/" + d.Name() + "/" + config.SkillFile)
 		if err != nil {
 			continue
 		}
-		skill, err := parseSkillMD(data)
+		sk, err := skill.ParseMD(data)
 		if err != nil {
 			continue
 		}
 		entries = append(entries, tool.SkillEntry{
-			Name:        skill.Name,
-			Description: skill.Description,
-			Body:        skill.Body,
+			Name:        sk.Name,
+			Description: sk.Description,
+			Body:        sk.Body,
 		})
 	}
 
@@ -410,7 +414,7 @@ func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 		args = map[string]any{}
 	}
 
-	if !a.approval.autoApprove(tc.Name, args) {
+	if !a.approval.AutoApprove(tc.Name, args) {
 		a.ui.ToolCallStart(tc.Name, args)
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
 			return nil, nil, fmt.Errorf("tool call denied by user")
@@ -496,7 +500,7 @@ func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
 
 	prompt := "Generate a concise 3-7 word title describing what the user is asking about. Use sentence case (only first word and proper nouns capitalized). Do not answer the question. Reply with ONLY the title, no quotes or punctuation.\n\nUser: " + userMsg
 
-	providerName, modelName := resolveModel(tm, a.config)
+	providerName, modelName := config.ResolveModel(tm, a.config)
 	providerCfg, ok := a.config.Providers[providerName]
 	if !ok {
 		return "", fmt.Errorf("unknown provider %q for title model", providerName)
@@ -558,12 +562,12 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 	childTools = append(childTools, &tool.SkillTool{Skills: entries})
 	childTools = filterTools(childTools, a.enabled)
 
-	systemPrompt := buildSystemPrompt(a.config, a.skills, a.sessionID, a.enabled)
+	systemPrompt := prompt.BuildSystem(a.config, a.skills, a.sessionID, a.enabled)
 
 	p := a.provider
 	childModel := a.model
 	if model != "" {
-		providerName, modelName := resolveModel(model, a.config)
+		providerName, modelName := config.ResolveModel(model, a.config)
 		providerCfg, ok := a.config.Providers[providerName]
 		if !ok {
 			return t.ToolResult{}, fmt.Errorf("unknown provider %q", providerName)
@@ -586,7 +590,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 		model:    childModel,
 		tools:    childTools,
 		config:   a.config,
-		approval: a.approval.forSubagent(),
+		approval: a.approval.ForSubagent(),
 		ui:       childUI,
 		messages: []t.Message{
 			{Role: t.RoleSystem, Content: systemPrompt},

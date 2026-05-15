@@ -12,8 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meain/fin/internal/approval"
+	"github.com/meain/fin/internal/config"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/render"
+	"github.com/meain/fin/internal/session"
+	"github.com/meain/fin/internal/skill"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
@@ -24,8 +28,8 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	cont := flag.Bool("continue", false, "continue last session")
 	flag.BoolVar(cont, "c", false, "continue last session (short)")
-	session := flag.String("session", "", "session UUID (for -continue or -export)")
-	flag.StringVar(session, "s", "", "session UUID (short)")
+	sessionFlag := flag.String("session", "", "session UUID (for -continue or -export)")
+	flag.StringVar(sessionFlag, "s", "", "session UUID (short)")
 	name := flag.String("name", "", "named session (resumes if exists, creates if not)")
 	flag.StringVar(name, "n", "", "named session (short)")
 	sessions := flag.Bool("sessions", false, "list saved sessions")
@@ -59,7 +63,7 @@ func main() {
 		// colors stay enabled
 	}
 
-	config, err := loadConfig(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
@@ -72,33 +76,33 @@ func main() {
 		}
 		var sinceTime time.Time
 		if *since != "" {
-			t, err := parseSince(*since)
+			t, err := session.ParseSince(*since)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %s\n", err)
 				os.Exit(1)
 			}
 			sinceTime = t
 		}
-		ListSessions(limit, sinceTime)
+		printSessions(limit, sinceTime)
 		return
 	}
 
-	loadSession := func() (*Session, error) {
+	loadSession := func() (*session.Session, error) {
 		if *name != "" {
-			return LoadSessionByName(*name)
+			return session.LoadByName(*name)
 		}
-		if *session != "" {
+		if *sessionFlag != "" {
 			// Try as numeric index first
-			if idx, err := strconv.Atoi(*session); err == nil {
-				return LoadSessionByIndex(idx)
+			if idx, err := strconv.Atoi(*sessionFlag); err == nil {
+				return session.LoadByIndex(idx)
 			}
 			// Try as UUID prefix, then fall back to name
-			if sess, err := LoadSessionByID(*session); err == nil {
+			if sess, err := session.LoadByID(*sessionFlag); err == nil {
 				return sess, nil
 			}
-			return LoadSessionByName(*session)
+			return session.LoadByName(*sessionFlag)
 		}
-		return LoadLastSession()
+		return session.LoadLast()
 	}
 
 	if *export != "" {
@@ -133,22 +137,22 @@ func main() {
 		approveMode = "all"
 	}
 	if approveMode == "" {
-		approveMode = config.Settings.Approve
+		approveMode = cfg.Settings.Approve
 	}
-	config.Settings.Approve = approveMode
-	approval := buildToolApproval(approveMode, config.Tools)
+	cfg.Settings.Approve = approveMode
+	app := approval.Build(approveMode, cfg.Tools)
 
 	if *maxTurns > 0 {
-		config.Settings.MaxTurns = *maxTurns
+		cfg.Settings.MaxTurns = *maxTurns
 	}
 
 	modelExplicit := *model != ""
 	modelStr := *model
 	if modelStr == "" {
-		modelStr = config.Models.Primary
+		modelStr = cfg.Models.Primary
 	}
 
-	outMode := parseOutputMode(config.Settings.UI)
+	outMode := parseOutputMode(cfg.Settings.UI)
 	if *uiMode != "" {
 		outMode = parseOutputMode(*uiMode)
 	}
@@ -157,7 +161,7 @@ func main() {
 	// Explicit -ui flag overrides this.
 	piped := *uiMode == "" && !term.IsTerminal(int(os.Stdout.Fd()))
 
-	skills := DiscoverSkills(config)
+	skills := skill.Discover(cfg)
 
 	args := flag.Args()
 
@@ -170,14 +174,14 @@ func main() {
 	}
 
 	// Resolve session first so we can inherit the model if needed.
-	var resumedSession *Session
-	var sw *SessionWriter
+	var resumedSession *session.Session
+	var sw *session.Writer
 	if *name != "" {
-		sess, err := LoadSessionByName(*name)
+		sess, err := session.LoadByName(*name)
 		if err == nil {
 			resumedSession = sess
 		}
-	} else if *cont || *session != "" {
+	} else if *cont || *sessionFlag != "" {
 		sess, err := loadSession()
 		if err != nil {
 			ui := NewUI(nil, outMode, piped)
@@ -188,7 +192,7 @@ func main() {
 		resumedSession = sess
 	} else if *match && pipedInput == "" && len(args) > 0 {
 		query := strings.Join(args, " ")
-		resumedSession = promptSessionMatch(query)
+		resumedSession = promptSessionMatch(query, cfg.Settings.Matching)
 	}
 
 	// Inherit model from resumed session unless explicitly overridden.
@@ -196,9 +200,9 @@ func main() {
 		modelStr = resumedSession.Model
 	}
 
-	providerName, modelName := resolveModel(modelStr, config)
+	providerName, modelName := config.ResolveModel(modelStr, cfg)
 	fullModel := providerName + "/" + modelName
-	providerCfg, ok := config.Providers[providerName]
+	providerCfg, ok := cfg.Providers[providerName]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "error: unknown provider %q\n", providerName)
 		os.Exit(1)
@@ -224,11 +228,11 @@ func main() {
 
 	ui := NewUI(nil, outMode, piped)
 	defer ui.Close()
-	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, config, approval, ui, skills, sessionID, enabledTools)
+	agent := NewAgent(&modelInjector{provider: p, model: modelName}, fullModel, cfg, app, ui, skills, sessionID, enabledTools)
 
 	if resumedSession != nil {
 		agent.SetMessages(resumedSession.Messages)
-		sw = SessionWriterForExisting(resumedSession)
+		sw = session.WriterForExisting(resumedSession)
 		label := resumedSession.ID
 		if resumedSession.Name != "" {
 			label = resumedSession.Name
@@ -237,10 +241,10 @@ func main() {
 	}
 	if sw == nil {
 		if *name != "" {
-			sw = NewSessionWriter(sessionID, fullModel, *name)
+			sw = session.NewWriter(sessionID, fullModel, *name)
 			ui.SessionInfo(SessionInfoData{Label: *name})
 		} else {
-			sw = NewSessionWriter(sessionID, fullModel, "")
+			sw = session.NewWriter(sessionID, fullModel, "")
 		}
 	}
 	var saveWarned bool
@@ -251,14 +255,14 @@ func main() {
 		}
 	}
 	agent.OnCompact = func() {
-		prevID := sw.id
-		sw = NewSessionWriter("", fullModel, "")
-		sw.previousSession = prevID
+		prevID := sw.ID()
+		sw = session.NewWriter("", fullModel, "")
+		sw.SetPreviousSession(prevID)
 	}
 
 	// Startup debug info
 	{
-		d := DebugStartup{Model: fullModel, SessionID: sw.id}
+		d := DebugStartup{Model: fullModel, SessionID: sw.ID()}
 		if len(skills) > 0 {
 			d.Skills = make([]string, len(skills))
 			for i, s := range skills {
@@ -353,16 +357,81 @@ func main() {
 	<-titleDone
 }
 
+// printSessions renders the session list. Outputs JSON when stdout is not a
+// terminal; otherwise renders a colored, fixed-width table. Pure data lives
+// in session.LoadSummaries; this is the terminal-flavored consumer.
+func printSessions(limit int, since time.Time) {
+	sessions, total, err := session.LoadSummaries(limit, since)
+	if err != nil || len(sessions) == 0 {
+		fmt.Fprintf(os.Stderr, "no sessions found\n")
+		return
+	}
+
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		data, _ := session.SummariesJSON(sessions)
+		fmt.Println(string(data))
+		return
+	}
+
+	termWidth, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	if termWidth <= 0 {
+		termWidth = 80
+	}
+
+	for idx, sess := range sessions {
+		title := sess.Title
+		if title == "" {
+			for _, m := range sess.Messages {
+				if m.Role == t.RoleUser {
+					title = m.Content
+					break
+				}
+			}
+		}
+		title = strings.ReplaceAll(title, "\n", " ")
+
+		msgCount := 0
+		for _, m := range sess.Messages {
+			if m.Role != t.RoleSystem {
+				msgCount++
+			}
+		}
+
+		age := render.RelativeTime(session.LastMessageTime(sess))
+		short := sess.ID[:8]
+		if sess.Name != "" {
+			short = fmt.Sprintf("%s [%s]", short, sess.Name)
+		}
+
+		counter := fmt.Sprintf("%d.", idx+1)
+		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)
+		maxTitle := termWidth - len(counter) - len(short) - len(meta) - 3
+		if maxTitle < 10 {
+			maxTitle = 10
+		}
+		titleRunes := []rune(title)
+		if len(titleRunes) > maxTitle {
+			title = string(titleRunes[:maxTitle-1]) + "…"
+		}
+
+		fmt.Printf("%s%s%s %s %s %s%s%s\n", render.Dim, counter, render.Reset, short, title, render.Dim, meta, render.Reset)
+	}
+
+	if limit > 0 && total > limit {
+		fmt.Fprintf(os.Stderr, "\n%sshowing %d of %d sessions, use -all to see all%s\n", render.Dim, limit, total, render.Reset)
+	}
+}
+
 // promptSessionMatch searches recent sessions for matches to the query and
 // asks the user whether to continue one. Returns the chosen session or nil.
-func promptSessionMatch(query string) *Session {
+func promptSessionMatch(query string, mc config.MatchingConfig) *session.Session {
 	const (
 		searchLimit = 24
 		minScore    = 1.5
 		maxShow     = 3
 	)
 
-	matches := FindMatchingSessions(query, searchLimit, minScore)
+	matches := session.FindMatching(query, searchLimit, minScore, mc)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -372,7 +441,7 @@ func promptSessionMatch(query string) *Session {
 
 	if len(matches) == 1 {
 		m := matches[0]
-		age := render.RelativeTime(lastMessageTime(m.Session))
+		age := render.RelativeTime(session.LastMessageTime(m.Session))
 		fmt.Fprintf(os.Stderr, "%ssimilar session:%s %s %s(%s)%s\n",
 			render.Dim, render.Reset, m.Session.Title, render.Dim, age, render.Reset)
 		fmt.Fprintf(os.Stderr, "continue? [y/N] ")
@@ -386,7 +455,7 @@ func promptSessionMatch(query string) *Session {
 
 	fmt.Fprintf(os.Stderr, "%ssimilar sessions:%s\n", render.Dim, render.Reset)
 	for i, m := range matches {
-		age := render.RelativeTime(lastMessageTime(m.Session))
+		age := render.RelativeTime(session.LastMessageTime(m.Session))
 		fmt.Fprintf(os.Stderr, "  %d. %s %s(%s)%s\n",
 			i+1, m.Session.Title, render.Dim, age, render.Reset)
 	}

@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 
 func TestResolveModel_ProviderSlashModel(t *testing.T) {
 	c := &Config{ModelAliases: map[string]string{}}
-	prov, model := resolveModel("anthropic/claude-sonnet", c)
+	prov, model := ResolveModel("anthropic/claude-sonnet", c)
 	if prov != "anthropic" {
 		t.Errorf("expected provider %q, got %q", "anthropic", prov)
 	}
@@ -24,7 +24,7 @@ func TestResolveModel_AliasResolution(t *testing.T) {
 			"sonnet": "anthropic/claude-sonnet-4-20250514",
 		},
 	}
-	prov, model := resolveModel("sonnet", c)
+	prov, model := ResolveModel("sonnet", c)
 	if prov != "anthropic" {
 		t.Errorf("expected provider %q, got %q", "anthropic", prov)
 	}
@@ -40,7 +40,7 @@ func TestResolveModel_ChainedAlias(t *testing.T) {
 			"sonnet":  "anthropic/claude-sonnet-4-20250514",
 		},
 	}
-	prov, model := resolveModel("default", c)
+	prov, model := ResolveModel("default", c)
 	if prov != "anthropic" {
 		t.Errorf("expected provider %q, got %q", "anthropic", prov)
 	}
@@ -51,7 +51,7 @@ func TestResolveModel_ChainedAlias(t *testing.T) {
 
 func TestResolveModel_BareModel(t *testing.T) {
 	c := &Config{ModelAliases: map[string]string{}}
-	prov, model := resolveModel("gpt-4o", c)
+	prov, model := ResolveModel("gpt-4o", c)
 	if prov != "" {
 		t.Errorf("expected empty provider, got %q", prov)
 	}
@@ -60,16 +60,13 @@ func TestResolveModel_BareModel(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_CircularAlias(t *testing.T) {
+func TestValidate_CircularAlias(t *testing.T) {
 	c := &Config{
-		ModelAliases: map[string]string{
-			"a": "b",
-			"b": "a",
-		},
-		Providers: map[string]ProviderConfig{},
-		Tools:     map[string]ToolConfig{},
+		ModelAliases: map[string]string{"a": "b", "b": "a"},
+		Providers:    map[string]ProviderConfig{},
+		Tools:        map[string]ToolConfig{},
 	}
-	err := validateConfig(c)
+	err := validate(c)
 	if err == nil {
 		t.Fatal("expected error for circular alias, got nil")
 	}
@@ -78,15 +75,13 @@ func TestValidateConfig_CircularAlias(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_InvalidProviderURL(t *testing.T) {
+func TestValidate_InvalidProviderURL(t *testing.T) {
 	c := &Config{
 		ModelAliases: map[string]string{},
-		Providers: map[string]ProviderConfig{
-			"bad": {BaseURL: "ftp://example.com"},
-		},
-		Tools: map[string]ToolConfig{},
+		Providers:    map[string]ProviderConfig{"bad": {BaseURL: "ftp://example.com"}},
+		Tools:        map[string]ToolConfig{},
 	}
-	err := validateConfig(c)
+	err := validate(c)
 	if err == nil {
 		t.Fatal("expected error for invalid provider URL, got nil")
 	}
@@ -95,15 +90,13 @@ func TestValidateConfig_InvalidProviderURL(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_InvalidToolApproval(t *testing.T) {
+func TestValidate_InvalidToolApproval(t *testing.T) {
 	c := &Config{
 		ModelAliases: map[string]string{},
 		Providers:    map[string]ProviderConfig{},
-		Tools: map[string]ToolConfig{
-			"shell": {Approval: "yolo"},
-		},
+		Tools:        map[string]ToolConfig{"shell": {Approval: "yolo"}},
 	}
-	err := validateConfig(c)
+	err := validate(c)
 	if err == nil {
 		t.Fatal("expected error for invalid approval level, got nil")
 	}
@@ -112,41 +105,18 @@ func TestValidateConfig_InvalidToolApproval(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_Valid(t *testing.T) {
+func TestValidate_Valid(t *testing.T) {
 	c := &Config{
 		ModelAliases: map[string]string{"s": "anthropic/sonnet"},
-		Providers: map[string]ProviderConfig{
-			"anthropic": {BaseURL: "https://api.anthropic.com"},
-		},
-		Tools: map[string]ToolConfig{
-			"read": {Approval: "auto"},
-		},
+		Providers:    map[string]ProviderConfig{"anthropic": {BaseURL: "https://api.anthropic.com"}},
+		Tools:        map[string]ToolConfig{"read": {Approval: "auto"}},
 	}
-	if err := validateConfig(c); err != nil {
+	if err := validate(c); err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
-func TestExpandHome_WithTilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir")
-	}
-	result := expandHome("~/some/path")
-	expected := filepath.Join(home, "some/path")
-	if result != expected {
-		t.Errorf("expected %q, got %q", expected, result)
-	}
-}
-
-func TestExpandHome_WithoutTilde(t *testing.T) {
-	result := expandHome("/absolute/path")
-	if result != "/absolute/path" {
-		t.Errorf("expected %q, got %q", "/absolute/path", result)
-	}
-}
-
-func TestLoadConfig_TempFile(t *testing.T) {
+func TestLoad_TempFile(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
@@ -173,9 +143,9 @@ approval = "auto"
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
-	cfg, err := loadConfig(configPath)
+	cfg, err := Load(configPath)
 	if err != nil {
-		t.Fatalf("loadConfig failed: %v", err)
+		t.Fatalf("Load failed: %v", err)
 	}
 
 	if cfg.Models.Primary != "openai/gpt-4o" {
@@ -195,21 +165,19 @@ approval = "auto"
 	}
 }
 
-func TestLoadConfig_DefaultCreation(t *testing.T) {
+func TestLoad_DefaultCreation(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "sub", "config.toml")
 
-	cfg, err := loadConfig(configPath)
+	cfg, err := Load(configPath)
 	if err != nil {
-		t.Fatalf("loadConfig failed: %v", err)
+		t.Fatalf("Load failed: %v", err)
 	}
 
-	// Should have default values
 	if cfg.Models.Primary != "anthropic/claude-sonnet-4-20250514" {
 		t.Errorf("expected default model, got %q", cfg.Models.Primary)
 	}
 
-	// File should have been created
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Error("expected config file to be created")
 	}

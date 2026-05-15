@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meain/fin/internal/approval"
+	"github.com/meain/fin/internal/config"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/tool"
 	tp "github.com/meain/fin/internal/types"
@@ -94,9 +96,9 @@ func streamWithText(text string) *fakeStream {
 	return &fakeStream{deltas: []tp.StreamDelta{{Content: text}}}
 }
 
-func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *Config) *Agent {
+func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *config.Config) *Agent {
 	if cfg == nil {
-		c := defaultConfig()
+		c := config.Default()
 		cfg = &c
 	}
 	ui := NewUI(nil, OutputSilent, false)
@@ -104,7 +106,7 @@ func newTestAgent(fp *fakeProvider, tools []tool.Tool, cfg *Config) *Agent {
 		provider: fp,
 		tools:    tools,
 		config:   cfg,
-		approval: buildToolApproval(cfg.Settings.Approve, cfg.Tools),
+		approval: approval.Build(cfg.Settings.Approve, cfg.Tools),
 		ui:       ui,
 		messages: []tp.Message{{Role: tp.RoleSystem, Content: "test"}},
 	}
@@ -123,9 +125,9 @@ func TestParallelToolExecution(t *testing.T) {
 		streamWithText("done"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["alpha"] = ToolConfig{Approval: "auto"}
-	cfg.Tools["beta"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["alpha"] = config.ToolConfig{Approval: "auto"}
+	cfg.Tools["beta"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft1, ft2}, &cfg)
 
@@ -159,9 +161,9 @@ func TestParallelToolResults_OrderPreserved(t *testing.T) {
 		streamWithText("done"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["slow"] = ToolConfig{Approval: "auto"}
-	cfg.Tools["fast"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["slow"] = config.ToolConfig{Approval: "auto"}
+	cfg.Tools["fast"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft1, ft2}, &cfg)
 
@@ -201,9 +203,9 @@ func TestParallelTool_DeniedToolDoesNotBlockOthers(t *testing.T) {
 		streamWithText("done"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["denied_tool"] = ToolConfig{Approval: "deny"}
-	cfg.Tools["allowed_tool"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["denied_tool"] = config.ToolConfig{Approval: "deny"}
+	cfg.Tools["allowed_tool"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft1, ft2}, &cfg)
 
@@ -245,8 +247,8 @@ func TestParallelTool_UnknownToolReturnsError(t *testing.T) {
 		streamWithText("done"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["real"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["real"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft}, &cfg)
 
@@ -277,8 +279,8 @@ func TestSingleToolCall_StillWorks(t *testing.T) {
 		streamWithText("done"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["solo"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["solo"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft}, &cfg)
 
@@ -318,8 +320,8 @@ func TestSubagentTool_IntegrationEndToEnd(t *testing.T) {
 		streamWithText("got it"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["subagent"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["subagent"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{st}, &cfg)
 
@@ -382,8 +384,8 @@ func TestToolError_PropagatedCorrectly(t *testing.T) {
 		streamWithText("handled"),
 	}}
 
-	cfg := defaultConfig()
-	cfg.Tools["failing"] = ToolConfig{Approval: "auto"}
+	cfg := config.Default()
+	cfg.Tools["failing"] = config.ToolConfig{Approval: "auto"}
 
 	agent := newTestAgent(fp, []tool.Tool{ft}, &cfg)
 

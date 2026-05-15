@@ -1,4 +1,7 @@
-package main
+// Package input wraps x/term for raw-mode stdin reading with mid-execution
+// Esc/Ctrl+C cancel support. Consumed only by the UI layer; the agent never
+// references this package directly.
+package input
 
 import (
 	"bytes"

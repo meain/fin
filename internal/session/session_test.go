@@ -1,9 +1,8 @@
-package main
+package session
 
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,65 +11,55 @@ import (
 	t2 "github.com/meain/fin/internal/types"
 )
 
-func TestSessionTitle_FirstUserMessage(t *testing.T) {
+func TestTitleFromFirstMessage(t *testing.T) {
 	messages := []t2.Message{
 		{Role: t2.RoleSystem, Content: "You are an assistant."},
 		{Role: t2.RoleUser, Content: "Hello, how are you?"},
 		{Role: t2.RoleAssistant, Content: "I'm fine!"},
 	}
-	title := sessionTitle(messages)
-	if title != "Hello, how are you?" {
+	if title := TitleFromFirstMessage(messages); title != "Hello, how are you?" {
 		t.Errorf("expected %q, got %q", "Hello, how are you?", title)
 	}
 }
 
-func TestSessionTitle_TruncatesLongMessages(t *testing.T) {
+func TestTitleFromFirstMessage_Truncates(t *testing.T) {
 	long := "This is a very long message that should definitely be truncated because it exceeds fifty characters"
-	messages := []t2.Message{
-		{Role: t2.RoleUser, Content: long},
+	title := TitleFromFirstMessage([]t2.Message{{Role: t2.RoleUser, Content: long}})
+	if len(title) > 55 {
+		t.Errorf("expected truncated, got length %d: %q", len(title), title)
 	}
-	title := sessionTitle(messages)
-	if len(title) > 55 { // 50 + length of "..." ellipsis character
-		t.Errorf("expected title to be truncated, got length %d: %q", len(title), title)
-	}
-	// Should start with the first 50 chars of the message
 	if title[:50] != long[:50] {
 		t.Errorf("expected title to start with first 50 chars")
 	}
 }
 
-func TestSessionTitle_NoUserMessages(t *testing.T) {
-	messages := []t2.Message{
+func TestTitleFromFirstMessage_NoUserMessages(t *testing.T) {
+	if title := TitleFromFirstMessage([]t2.Message{
 		{Role: t2.RoleSystem, Content: "system prompt"},
 		{Role: t2.RoleAssistant, Content: "hello"},
-	}
-	title := sessionTitle(messages)
-	if title != "" {
+	}); title != "" {
 		t.Errorf("expected empty title, got %q", title)
 	}
 }
 
-func TestSessionTitle_EmptyMessages(t *testing.T) {
-	title := sessionTitle(nil)
-	if title != "" {
+func TestTitleFromFirstMessage_Empty(t *testing.T) {
+	if title := TitleFromFirstMessage(nil); title != "" {
 		t.Errorf("expected empty title, got %q", title)
 	}
 }
 
-func TestSessionTitle_CollapsesWhitespace(t *testing.T) {
-	messages := []t2.Message{
+func TestTitleFromFirstMessage_CollapsesWhitespace(t *testing.T) {
+	title := TitleFromFirstMessage([]t2.Message{
 		{Role: t2.RoleUser, Content: "  hello   world\n\nnewline  "},
-	}
-	title := sessionTitle(messages)
+	})
 	if title != "hello world newline" {
 		t.Errorf("expected %q, got %q", "hello world newline", title)
 	}
 }
 
-func TestSessionWriter_SaveAndLoad(t *testing.T) {
+func TestWriter_SaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
-
-	sw := &SessionWriter{
+	w := &Writer{
 		id:       "test-id-1234",
 		model:    "anthropic/claude-sonnet",
 		cwd:      "/tmp/test",
@@ -83,15 +72,14 @@ func TestSessionWriter_SaveAndLoad(t *testing.T) {
 		{Role: t2.RoleAssistant, Content: "Go is a programming language.", Timestamp: time.Now()},
 	}
 
-	if err := sw.Save(messages); err != nil {
+	if err := w.Save(messages); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	sess, err := readSessionFile(sw.filepath)
+	sess, err := readFile(w.filepath)
 	if err != nil {
 		t.Fatalf("failed to read saved session: %v", err)
 	}
-
 	if sess.ID != "test-id-1234" {
 		t.Errorf("expected ID %q, got %q", "test-id-1234", sess.ID)
 	}
@@ -106,28 +94,28 @@ func TestSessionWriter_SaveAndLoad(t *testing.T) {
 	}
 }
 
-func TestSessionWriter_AppendOnly(t *testing.T) {
+func TestWriter_AppendOnly(t *testing.T) {
 	dir := t.TempDir()
-	sw := &SessionWriter{
+	w := &Writer{
 		id:       "append-test",
 		model:    "m",
 		started:  time.Now(),
 		filepath: filepath.Join(dir, "append.jsonl"),
 	}
 	msgs := []t2.Message{{Role: t2.RoleUser, Content: "a"}}
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	statBefore, _ := os.Stat(sw.filepath)
+	statBefore, _ := os.Stat(w.filepath)
 	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "b"})
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	statAfter, _ := os.Stat(sw.filepath)
+	statAfter, _ := os.Stat(w.filepath)
 	if statAfter.Size() <= statBefore.Size() {
 		t.Fatalf("expected file to grow, before=%d after=%d", statBefore.Size(), statAfter.Size())
 	}
-	sess, err := readSessionFile(sw.filepath)
+	sess, err := readFile(w.filepath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +124,7 @@ func TestSessionWriter_AppendOnly(t *testing.T) {
 	}
 }
 
-func TestSessionWriter_ResumeAppends(t *testing.T) {
+func TestWriter_ResumeAppends(t *testing.T) {
 	home := t.TempDir()
 	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
@@ -144,16 +132,13 @@ func TestSessionWriter_ResumeAppends(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	// Initial session with one user message.
-	sw := NewSessionWriter("resume-id", "m", "")
-	initial := []t2.Message{{Role: t2.RoleUser, Content: "first"}}
-	if err := sw.Save(initial); err != nil {
+	w := NewWriter("resume-id", "m", "")
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
-	originalPath := sw.filepath
+	originalPath := w.filepath
 
-	// Reload via the same code path the CLI uses.
-	loaded, err := readSessionFile(originalPath)
+	loaded, err := readFile(originalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,38 +146,36 @@ func TestSessionWriter_ResumeAppends(t *testing.T) {
 		t.Fatalf("expected 1 message, got %d", len(loaded.Messages))
 	}
 
-	// SessionWriterForExisting should reuse the existing file, full-rewrite
-	// once (headerDirty), then append subsequent saves.
-	sw2 := SessionWriterForExisting(loaded)
-	if sw2.filepath != originalPath {
-		t.Fatalf("expected reuse of %s, got %s", originalPath, sw2.filepath)
+	w2 := WriterForExisting(loaded)
+	if w2.filepath != originalPath {
+		t.Fatalf("expected reuse of %s, got %s", originalPath, w2.filepath)
 	}
-	if !sw2.headerDirty {
+	if !w2.headerDirty {
 		t.Fatal("resumed writer should have headerDirty=true")
 	}
 
 	msgs := append(loaded.Messages, t2.Message{Role: t2.RoleAssistant, Content: "reply"})
-	if err := sw2.Save(msgs); err != nil { // triggers full rewrite
+	if err := w2.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	if sw2.headerDirty {
+	if w2.headerDirty {
 		t.Error("headerDirty should be cleared after rewrite")
 	}
-	if sw2.lastWrittenCount != 2 {
-		t.Errorf("expected lastWrittenCount=2, got %d", sw2.lastWrittenCount)
+	if w2.lastWrittenCount != 2 {
+		t.Errorf("expected lastWrittenCount=2, got %d", w2.lastWrittenCount)
 	}
 
-	sizeBefore, _ := os.Stat(sw2.filepath)
+	sizeBefore, _ := os.Stat(w2.filepath)
 	msgs = append(msgs, t2.Message{Role: t2.RoleUser, Content: "third"})
-	if err := sw2.Save(msgs); err != nil { // should append, not rewrite
+	if err := w2.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	sizeAfter, _ := os.Stat(sw2.filepath)
+	sizeAfter, _ := os.Stat(w2.filepath)
 	if sizeAfter.Size() <= sizeBefore.Size() {
 		t.Errorf("expected file to grow on append, before=%d after=%d", sizeBefore.Size(), sizeAfter.Size())
 	}
 
-	final, err := readSessionFile(sw2.filepath)
+	final, err := readFile(w2.filepath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,46 +187,42 @@ func TestSessionWriter_ResumeAppends(t *testing.T) {
 	}
 }
 
-func TestSessionWriter_ConflictDetected(t *testing.T) {
+func TestWriter_ConflictDetected(t *testing.T) {
 	dir := t.TempDir()
-	sw := &SessionWriter{
+	w := &Writer{
 		id:       "conflict-test",
 		model:    "m",
 		started:  time.Now(),
 		filepath: filepath.Join(dir, "conflict.jsonl"),
 	}
 	msgs := []t2.Message{{Role: t2.RoleUser, Content: "first"}}
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
 
-	// Simulate another process touching the file with a later mtime.
 	future := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(sw.filepath, future, future); err != nil {
+	if err := os.Chtimes(w.filepath, future, future); err != nil {
 		t.Fatal(err)
 	}
 
 	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "second"})
-	err := sw.Save(msgs)
-	if err == nil {
+	if err := w.Save(msgs); err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
-	if !sw.conflicted {
+	if !w.conflicted {
 		t.Error("writer should be marked conflicted after mismatch")
 	}
-	// Subsequent saves keep returning the conflict error and do not write.
-	statBefore, _ := os.Stat(sw.filepath)
-	err2 := sw.Save(msgs)
-	if err2 == nil {
+	statBefore, _ := os.Stat(w.filepath)
+	if err := w.Save(msgs); err == nil {
 		t.Fatal("expected conflict error on subsequent save, got nil")
 	}
-	statAfter, _ := os.Stat(sw.filepath)
+	statAfter, _ := os.Stat(w.filepath)
 	if statAfter.Size() != statBefore.Size() {
 		t.Errorf("file should not change after conflict; before=%d after=%d", statBefore.Size(), statAfter.Size())
 	}
 }
 
-func TestSessionWriter_ResumeDetectsExternalWrite(t *testing.T) {
+func TestWriter_ResumeDetectsExternalWrite(t *testing.T) {
 	home := t.TempDir()
 	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
@@ -251,27 +230,23 @@ func TestSessionWriter_ResumeDetectsExternalWrite(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	sw := NewSessionWriter("ext-test", "m", "")
-	if err := sw.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
+	w := NewWriter("ext-test", "m", "")
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := readSessionFile(sw.filepath)
+	loaded, err := readFile(w.filepath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Another fin process completes a write between load and resume.
 	future := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(sw.filepath, future, future); err != nil {
+	if err := os.Chtimes(w.filepath, future, future); err != nil {
 		t.Fatal(err)
 	}
 
-	resumed := SessionWriterForExisting(loaded)
-	// SessionWriterForExisting snapshots mtime at construction so this resume
-	// itself is fine; the test guards against double-resume by simulating
-	// a *further* external write between construction and first save.
+	resumed := WriterForExisting(loaded)
 	further := time.Now().Add(4 * time.Second)
-	if err := os.Chtimes(sw.filepath, further, further); err != nil {
+	if err := os.Chtimes(w.filepath, further, further); err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,10 +256,10 @@ func TestSessionWriter_ResumeDetectsExternalWrite(t *testing.T) {
 	}
 }
 
-func TestReadSessionFile_DropsTruncatedTrailingLine(t *testing.T) {
+func TestReadFile_DropsTruncatedTrailingLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "truncated.jsonl")
-	sw := &SessionWriter{
+	w := &Writer{
 		id:       "trunc-test",
 		model:    "m",
 		started:  time.Now(),
@@ -294,10 +269,9 @@ func TestReadSessionFile_DropsTruncatedTrailingLine(t *testing.T) {
 		{Role: t2.RoleUser, Content: "first"},
 		{Role: t2.RoleAssistant, Content: "second"},
 	}
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a crash mid-append: tack on a half-written JSON object.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +281,7 @@ func TestReadSessionFile_DropsTruncatedTrailingLine(t *testing.T) {
 	}
 	f.Close()
 
-	sess, err := readSessionFile(path)
+	sess, err := readFile(path)
 	if err != nil {
 		t.Fatalf("reader should tolerate trailing corrupt line, got: %v", err)
 	}
@@ -319,7 +293,7 @@ func TestReadSessionFile_DropsTruncatedTrailingLine(t *testing.T) {
 	}
 }
 
-func TestReadSessionFile_RejectsCorruptMiddleLine(t *testing.T) {
+func TestReadFile_RejectsCorruptMiddleLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "corrupt-middle.jsonl")
 	content := `{"id":"x","title":"t","model":"m","cwd":"","started_at":"2026-01-01T00:00:00Z"}
@@ -330,29 +304,29 @@ not-json-at-all
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readSessionFile(path); err == nil {
+	if _, err := readFile(path); err == nil {
 		t.Fatal("expected error for corrupt middle line, got nil")
 	}
 }
 
-func TestSessionWriter_SetTitleTriggersRewrite(t *testing.T) {
+func TestWriter_SetTitleTriggersRewrite(t *testing.T) {
 	dir := t.TempDir()
-	sw := &SessionWriter{
+	w := &Writer{
 		id:       "title-test",
 		model:    "m",
 		started:  time.Now(),
 		filepath: filepath.Join(dir, "title.jsonl"),
 	}
 	msgs := []t2.Message{{Role: t2.RoleUser, Content: "hello"}}
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	sw.SetTitle("My Title")
+	w.SetTitle("My Title")
 	msgs = append(msgs, t2.Message{Role: t2.RoleAssistant, Content: "hi"})
-	if err := sw.Save(msgs); err != nil {
+	if err := w.Save(msgs); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := readSessionFile(sw.filepath)
+	sess, err := readFile(w.filepath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,9 +348,8 @@ func TestLastMessageTime_ReturnsLastTimestamp(t *testing.T) {
 			{Role: t2.RoleAssistant, Content: "hello", Timestamp: now},
 		},
 	}
-	result := lastMessageTime(sess)
-	if !result.Equal(now) {
-		t.Errorf("expected %v, got %v", now, result)
+	if got := LastMessageTime(sess); !got.Equal(now) {
+		t.Errorf("expected %v, got %v", now, got)
 	}
 }
 
@@ -386,12 +359,11 @@ func TestLastMessageTime_SkipsZeroTimestamps(t *testing.T) {
 		StartedAt: now.Add(-1 * time.Hour),
 		Messages: []t2.Message{
 			{Role: t2.RoleUser, Content: "hi", Timestamp: now},
-			{Role: t2.RoleAssistant, Content: "hello"}, // zero timestamp
+			{Role: t2.RoleAssistant, Content: "hello"},
 		},
 	}
-	result := lastMessageTime(sess)
-	if !result.Equal(now) {
-		t.Errorf("expected %v, got %v", now, result)
+	if got := LastMessageTime(sess); !got.Equal(now) {
+		t.Errorf("expected %v, got %v", now, got)
 	}
 }
 
@@ -399,19 +371,16 @@ func TestLastMessageTime_FallsBackToStartedAt(t *testing.T) {
 	startedAt := time.Now().Add(-1 * time.Hour)
 	sess := Session{
 		StartedAt: startedAt,
-		Messages: []t2.Message{
-			{Role: t2.RoleUser, Content: "hi"}, // all zero timestamps
-		},
+		Messages:  []t2.Message{{Role: t2.RoleUser, Content: "hi"}},
 	}
-	result := lastMessageTime(sess)
-	if !result.Equal(startedAt) {
-		t.Errorf("expected StartedAt %v, got %v", startedAt, result)
+	if got := LastMessageTime(sess); !got.Equal(startedAt) {
+		t.Errorf("expected StartedAt %v, got %v", startedAt, got)
 	}
 }
 
 func TestParseSince_Hours(t *testing.T) {
 	before := time.Now()
-	cutoff, err := parseSince("2h")
+	cutoff, err := ParseSince("2h")
 	after := time.Now()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -425,7 +394,7 @@ func TestParseSince_Hours(t *testing.T) {
 
 func TestParseSince_Days(t *testing.T) {
 	before := time.Now()
-	cutoff, err := parseSince("3d")
+	cutoff, err := ParseSince("3d")
 	after := time.Now()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -440,7 +409,7 @@ func TestParseSince_Days(t *testing.T) {
 
 func TestParseSince_Weeks(t *testing.T) {
 	before := time.Now()
-	cutoff, err := parseSince("2w")
+	cutoff, err := ParseSince("2w")
 	after := time.Now()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -454,7 +423,7 @@ func TestParseSince_Weeks(t *testing.T) {
 }
 
 func TestParseSince_Minutes(t *testing.T) {
-	cutoff, err := parseSince("30m")
+	cutoff, err := ParseSince("30m")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -464,84 +433,21 @@ func TestParseSince_Minutes(t *testing.T) {
 }
 
 func TestParseSince_InvalidSuffix(t *testing.T) {
-	_, err := parseSince("foo")
-	if err == nil {
+	if _, err := ParseSince("foo"); err == nil {
 		t.Error("expected error for invalid duration")
 	}
 }
 
 func TestParseSince_InvalidNumber(t *testing.T) {
 	for _, s := range []string{"xd", "yw", "zd"} {
-		_, err := parseSince(s)
-		if err == nil {
+		if _, err := ParseSince(s); err == nil {
 			t.Errorf("expected error for %q", s)
 		}
 	}
 }
 
-func TestFilterSessionsSince_ZeroCutoff(t *testing.T) {
-	sessions := []Session{
-		{ID: "a", StartedAt: time.Now().Add(-48 * time.Hour)},
-		{ID: "b", StartedAt: time.Now().Add(-1 * time.Hour)},
-	}
-	result := filterSessionsSince(sessions, time.Time{})
-	if len(result) != 2 {
-		t.Errorf("zero cutoff should return all sessions, got %d", len(result))
-	}
-}
-
-func TestFilterSessionsSince_ExcludesOld(t *testing.T) {
-	now := time.Now()
-	sessions := []Session{
-		{
-			ID:        "old",
-			StartedAt: now.Add(-72 * time.Hour),
-			Messages:  []t2.Message{{Role: t2.RoleUser, Timestamp: now.Add(-72 * time.Hour)}},
-		},
-		{
-			ID:        "recent",
-			StartedAt: now.Add(-1 * time.Hour),
-			Messages:  []t2.Message{{Role: t2.RoleUser, Timestamp: now.Add(-1 * time.Hour)}},
-		},
-	}
-	cutoff := now.Add(-24 * time.Hour)
-	result := filterSessionsSince(sessions, cutoff)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 session, got %d", len(result))
-	}
-	if result[0].ID != "recent" {
-		t.Errorf("expected recent session, got %q", result[0].ID)
-	}
-}
-
-func TestFilterSessionsSince_AllRecent(t *testing.T) {
-	now := time.Now()
-	cutoff := now.Add(-7 * 24 * time.Hour)
-	sessions := []Session{
-		{ID: "a", Messages: []t2.Message{{Timestamp: now.Add(-1 * time.Hour)}}},
-		{ID: "b", Messages: []t2.Message{{Timestamp: now.Add(-2 * time.Hour)}}},
-		{ID: "c", Messages: []t2.Message{{Timestamp: now.Add(-3 * time.Hour)}}},
-	}
-	result := filterSessionsSince(sessions, cutoff)
-	if len(result) != 3 {
-		t.Errorf("expected 3 sessions, got %d", len(result))
-	}
-}
-
-func TestFilterSessionsSince_AllOld(t *testing.T) {
-	now := time.Now()
-	cutoff := now.Add(-1 * time.Hour)
-	sessions := []Session{
-		{ID: "a", Messages: []t2.Message{{Timestamp: now.Add(-48 * time.Hour)}}},
-		{ID: "b", Messages: []t2.Message{{Timestamp: now.Add(-72 * time.Hour)}}},
-	}
-	result := filterSessionsSince(sessions, cutoff)
-	if len(result) != 0 {
-		t.Errorf("expected 0 sessions, got %d", len(result))
-	}
-}
-
-// writeTestSession saves a minimal session JSONL to dir for use in ListSessions tests.
+// writeTestSession saves a minimal session JSONL to dir for use in
+// LoadSummaries tests.
 func writeTestSession(t *testing.T, dir string, id string, age time.Duration, msgCount int) {
 	t.Helper()
 	now := time.Now()
@@ -576,7 +482,7 @@ func writeTestSession(t *testing.T, dir string, id string, age time.Duration, ms
 	}
 }
 
-func TestListSessions_JSONOutput(t *testing.T) {
+func TestLoadSummaries_AllRecent(t *testing.T) {
 	home := t.TempDir()
 	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
@@ -588,34 +494,16 @@ func TestListSessions_JSONOutput(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	// Capture stdout — in test env os.Stdout is not a terminal so JSON path runs.
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	ListSessions(-1, time.Time{})
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-
-	var summaries []SessionSummary
-	if err := json.Unmarshal(buf.Bytes(), &summaries); err != nil {
-		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+	sessions, total, err := LoadSummaries(-1, time.Time{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(summaries) != 2 {
-		t.Errorf("expected 2 summaries, got %d", len(summaries))
-	}
-	for _, s := range summaries {
-		if s.ID == "" || s.Model == "" || s.MessageCount == 0 {
-			t.Errorf("summary missing fields: %+v", s)
-		}
+	if len(sessions) != 2 || total != 2 {
+		t.Errorf("expected 2/2, got %d/%d", len(sessions), total)
 	}
 }
 
-func TestListSessions_SinceFiltersJSON(t *testing.T) {
+func TestLoadSummaries_SinceFilter(t *testing.T) {
 	home := t.TempDir()
 	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
 	if err := os.MkdirAll(sessDir, 0755); err != nil {
@@ -627,27 +515,15 @@ func TestListSessions_SinceFiltersJSON(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	since := time.Now().Add(-24 * time.Hour)
-	ListSessions(-1, since)
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-
-	var summaries []SessionSummary
-	if err := json.Unmarshal(buf.Bytes(), &summaries); err != nil {
-		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+	sessions, total, err := LoadSummaries(-1, since)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(summaries) != 1 {
-		t.Errorf("expected 1 summary (recent only), got %d", len(summaries))
+	if len(sessions) != 1 || total != 1 {
+		t.Errorf("expected 1/1, got %d/%d", len(sessions), total)
 	}
-	if len(summaries) > 0 && summaries[0].ID != "recent11-0000-0000-0000-000000000000" {
-		t.Errorf("expected recent session, got %q", summaries[0].ID)
+	if len(sessions) > 0 && sessions[0].ID != "recent11-0000-0000-0000-000000000000" {
+		t.Errorf("expected recent session, got %q", sessions[0].ID)
 	}
 }

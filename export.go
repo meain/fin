@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	finembed "github.com/meain/fin/internal/embed"
+	"github.com/meain/fin/internal/session"
 	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
 
@@ -31,7 +32,7 @@ func renderMarkdown(src string) string {
 }
 
 // ExportJSON writes the session as formatted JSON to w.
-func ExportJSON(sess *Session, w io.Writer) {
+func ExportJSON(sess *session.Session, w io.Writer) {
 	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
 		fmt.Fprintf(w, "error: %s\n", err)
@@ -42,7 +43,7 @@ func ExportJSON(sess *Session, w io.Writer) {
 }
 
 // ExportHTML writes the session as a self-contained HTML page to w.
-func ExportHTML(sess *Session, w io.Writer) {
+func ExportHTML(sess *session.Session, w io.Writer) {
 	title := sess.Title
 	if title == "" {
 		title = "fin session"
@@ -70,7 +71,7 @@ type renderOpts struct {
 	ExpandSubagent bool                  // recurse into RoleTool subagent SubMessages
 }
 
-func writeHTMLHead(w io.Writer, title string, sess *Session) {
+func writeHTMLHead(w io.Writer, title string, sess *session.Session) {
 	fmt.Fprintf(w, `<!DOCTYPE html>
 <html lang="en">
 <head>

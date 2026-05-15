@@ -1,4 +1,4 @@
-package main
+package skill
 
 import (
 	"os"
@@ -18,7 +18,7 @@ Hello! This is the body of the skill.
 
 It has multiple paragraphs.`)
 
-	skill, err := parseSkillMD(data)
+	skill, err := ParseMD(data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,7 @@ description: A skill without a name
 ---
 Body text.`)
 
-	_, err := parseSkillMD(data)
+	_, err := ParseMD(data)
 	if err == nil {
 		t.Fatal("expected error for missing name, got nil")
 	}
@@ -63,7 +63,7 @@ name: nodesc
 ---
 Body text.`)
 
-	_, err := parseSkillMD(data)
+	_, err := ParseMD(data)
 	if err == nil {
 		t.Fatal("expected error for missing description, got nil")
 	}
@@ -75,7 +75,7 @@ Body text.`)
 func TestParseSkillMD_NoFrontmatter(t *testing.T) {
 	data := []byte(`Just some markdown without frontmatter.`)
 
-	_, err := parseSkillMD(data)
+	_, err := ParseMD(data)
 	if err == nil {
 		t.Fatal("expected error for no frontmatter, got nil")
 	}
@@ -91,7 +91,7 @@ description: A skill with no body
 ---
 `)
 
-	skill, err := parseSkillMD(data)
+	skill, err := ParseMD(data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +141,7 @@ Lint all the things.`
 		t.Fatal(err)
 	}
 
-	skills := scanSkillsDir(dir)
+	skills := scanDir(dir)
 	if len(skills) != 2 {
 		t.Fatalf("expected 2 skills, got %d", len(skills))
 	}
@@ -183,14 +183,14 @@ Body.`
 		t.Fatal(err)
 	}
 
-	skills := scanSkillsDir(dir)
+	skills := scanDir(dir)
 	if len(skills) != 0 {
 		t.Errorf("expected 0 skills (name mismatch), got %d", len(skills))
 	}
 }
 
 func TestScanSkillsDir_NonexistentDir(t *testing.T) {
-	skills := scanSkillsDir("/nonexistent/path/that/does/not/exist")
+	skills := scanDir("/nonexistent/path/that/does/not/exist")
 	if skills != nil {
 		t.Errorf("expected nil for nonexistent dir, got %v", skills)
 	}

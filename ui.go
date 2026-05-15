@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meain/fin/internal/input"
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
@@ -143,7 +144,7 @@ type toolLineState struct {
 
 // UI handles terminal output via a single goroutine that processes events.
 type UI struct {
-	term   *Terminal
+	term   *input.Terminal
 	mode   OutputMode
 	piped  bool // stdout is not a terminal; only stream response text to stdout
 	events chan UIEvent
@@ -156,7 +157,7 @@ type UI struct {
 	toolLines         []toolLineState
 }
 
-func NewUI(t *Terminal, mode OutputMode, piped bool) *UI {
+func NewUI(t *input.Terminal, mode OutputMode, piped bool) *UI {
 	if mode == OutputSilent {
 		return &UI{mode: mode}
 	}
