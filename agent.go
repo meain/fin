@@ -55,7 +55,7 @@ type Agent struct {
 
 func NewAgent(p provider.Provider, model string, config *Config, approval *toolApproval, ui UIWriter, skills []*Skill, sessionID string, enabled map[string]bool) *Agent {
 	tools := buildTools(skills, enabled)
-	systemPrompt := buildSystemPrompt(config, skills, sessionID)
+	systemPrompt := buildSystemPrompt(config, skills, sessionID, enabled)
 
 	a := &Agent{
 		provider:  p,
@@ -557,7 +557,7 @@ func (a *Agent) runSubagent(ctx context.Context, task, model string) (t.ToolResu
 	childTools = append(childTools, &tool.SkillTool{Skills: entries})
 	childTools = filterTools(childTools, a.enabled)
 
-	systemPrompt := buildSystemPrompt(a.config, a.skills, a.sessionID)
+	systemPrompt := buildSystemPrompt(a.config, a.skills, a.sessionID, a.enabled)
 
 	p := a.provider
 	childModel := a.model

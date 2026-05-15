@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string {
+func buildSystemPrompt(config *Config, skills []*Skill, sessionID string, enabled map[string]bool) string {
 	var b strings.Builder
-	b.WriteString(baseSystemPrompt)
+	b.WriteString(gateSystemPrompt(baseSystemPrompt, enabled))
 
 	// Runtime context
 	cwd, _ := os.Getwd()
@@ -24,8 +24,10 @@ func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string
 		fmt.Fprintf(&b, "\n- Session ID: %s", sessionID)
 	}
 
-	// Available skills (progressive disclosure: name + description only)
-	if len(skills) > 0 {
+	// Available skills (progressive disclosure: name + description only).
+	// Suppressed entirely when use_skill is disabled — the model cannot activate them.
+	useSkillOn := enabled == nil || enabled["use_skill"]
+	if useSkillOn && len(skills) > 0 {
 		b.WriteString("\n\nAvailable skills (use the use_skill tool to activate one):\n")
 		for _, s := range skills {
 			fmt.Fprintf(&b, "- %s: %s (skill file: %s)\n", s.Name, s.Description, filepath.Join(s.Dir, skillFile))
@@ -44,6 +46,60 @@ func buildSystemPrompt(config *Config, skills []*Skill, sessionID string) string
 	}
 
 	return b.String()
+}
+
+// gateSystemPrompt strips sections of the base prompt that reference disabled tools.
+// Sections are recognized by `## <header>` markers. The intro (text before the first
+// `## ` header) is always kept. With enabled == nil all sections are kept.
+//
+// Section → tool requirement:
+//   Tool usage → any tool enabled
+//   About      → use_skill enabled (mentions the about_fin skill)
+//   Shell      → shell tool
+//   Subagents  → subagent tool
+//   Compact    → compact tool
+//
+// Unknown sections are kept as-is so editors can add prose without code changes.
+func gateSystemPrompt(s string, enabled map[string]bool) string {
+	if enabled == nil {
+		return s
+	}
+
+	keep := func(header string) bool {
+		switch header {
+		case "Tool usage":
+			return len(enabled) > 0
+		case "About":
+			return enabled["use_skill"]
+		case "Shell":
+			return enabled["shell"]
+		case "Subagents":
+			return enabled["subagent"]
+		case "Compact":
+			return enabled["compact"]
+		default:
+			return true
+		}
+	}
+
+	lines := strings.Split(s, "\n")
+	var out strings.Builder
+	dropping := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") {
+			header := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			dropping = !keep(header)
+			if dropping {
+				continue
+			}
+		}
+		if !dropping {
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
+	}
+
+	return strings.TrimRight(out.String(), "\n")
 }
 
 // readAgentsMD reads ~/.agents/AGENTS.md if it exists.
