@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
 )
 
@@ -41,7 +42,7 @@ func (wt *WriteTool) Run(_ context.Context, args map[string]any) (t.ToolResult, 
 	if path == "" {
 		return t.ToolResult{}, fmt.Errorf("path is required")
 	}
-	path = t.ExpandHome(path)
+	path = fsutil.ExpandHome(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return t.ToolResult{}, fmt.Errorf("failed to create directories: %w", err)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meain/fin/internal/render"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
@@ -622,7 +623,7 @@ func ListSessions(limit int, since time.Time) {
 			}
 		}
 
-		age := relativeTime(lastMessageTime(sess))
+		age := render.RelativeTime(lastMessageTime(sess))
 		short := sess.ID[:8]
 		if sess.Name != "" {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
@@ -639,11 +640,11 @@ func ListSessions(limit int, since time.Time) {
 			title = string(titleRunes[:maxTitle-1]) + "…"
 		}
 
-		fmt.Printf("%s%s%s %s %s %s%s%s\n", dim, counter, reset, short, title, dim, meta, reset)
+		fmt.Printf("%s%s%s %s %s %s%s%s\n", render.Dim, counter, render.Reset, short, title, render.Dim, meta, render.Reset)
 	}
 
 	if limit > 0 && total > limit {
-		fmt.Fprintf(os.Stderr, "\n%sshowing %d of %d sessions, use -all to see all%s\n", dim, limit, total, reset)
+		fmt.Fprintf(os.Stderr, "\n%sshowing %d of %d sessions, use -all to see all%s\n", render.Dim, limit, total, render.Reset)
 	}
 }
 
@@ -656,16 +657,3 @@ func lastMessageTime(s Session) time.Time {
 	return s.StartedAt
 }
 
-func relativeTime(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-}

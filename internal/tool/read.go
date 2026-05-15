@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
 )
 
@@ -55,7 +56,7 @@ func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	if path == "" {
 		return t.ToolResult{}, fmt.Errorf("path is required")
 	}
-	path = t.ExpandHome(path)
+	path = fsutil.ExpandHome(path)
 
 	info, err := os.Stat(path)
 	if err != nil {

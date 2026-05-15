@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	finembed "github.com/meain/fin/internal/embed"
 	t "github.com/meain/fin/internal/types"
 
 	"github.com/yuin/goldmark"
@@ -100,8 +101,8 @@ func ExportHTML(sess *Session, w io.Writer) {
 `,
 		html.EscapeString(title),
 	)
-	fmt.Fprintf(w, "<style>%s</style>\n", hljsCSS)
-	fmt.Fprintf(w, "<script>%s</script>\n", hljsJS)
+	fmt.Fprintf(w, "<style>%s</style>\n", finembed.HljsCSS)
+	fmt.Fprintf(w, "<script>%s</script>\n", finembed.HljsJS)
 	fmt.Fprintf(w, `</head>
 <body>
 <h1>%s</h1>

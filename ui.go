@@ -7,35 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meain/fin/internal/render"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
 
 var stdout = os.Stdout
-
-// ANSI escape codes — variables so they can be cleared by disableColors().
-var (
-	reset   = "\033[0m"
-	bold    = "\033[1m"
-	dim     = "\033[2m"
-	red     = "\033[31m"
-	green   = "\033[32m"
-	yellow  = "\033[33m"
-	magenta = "\033[35m"
-	dimFg   = "\033[38;5;243m" // muted gray for debug lines
-)
-
-// disableColors clears all ANSI escape code variables.
-func disableColors() {
-	reset = ""
-	bold = ""
-	dim = ""
-	red = ""
-	green = ""
-	yellow = ""
-	magenta = ""
-	dimFg = ""
-}
 
 // OutputMode controls how much the UI displays.
 type OutputMode int
@@ -373,10 +350,10 @@ func (u *UI) handleEvent(ev UIEvent) {
 		if u.piped || (u.mode != OutputDefault && u.mode != OutputDebug) {
 			return
 		}
-		u.write(fmt.Sprintf("%s%s%s\n", dim, ev.Text, reset))
+		u.write(fmt.Sprintf("%s%s%s\n", render.Dim, ev.Text, render.Reset))
 
 	case uiError:
-		u.write(fmt.Sprintf("%s%serror: %s%s\n", bold, red, ev.Text, reset))
+		u.write(fmt.Sprintf("%s%serror: %s%s\n", render.Bold, render.Red, ev.Text, render.Reset))
 
 	case uiSessionInfo:
 		if u.mode != OutputDebug {
@@ -386,9 +363,9 @@ func (u *UI) handleEvent(ev UIEvent) {
 			s := ev.Session
 			if s.Resumed {
 				u.write(fmt.Sprintf("%sresumed session %s (%s)%s\n",
-					dim, s.Label, s.StartedAt.Format("2006-01-02 15:04"), reset))
+					render.Dim, s.Label, s.StartedAt.Format("2006-01-02 15:04"), render.Reset))
 			} else {
-				u.write(fmt.Sprintf("%snew session [%s]%s\n", dim, s.Label, reset))
+				u.write(fmt.Sprintf("%snew session [%s]%s\n", render.Dim, s.Label, render.Reset))
 			}
 		}
 
@@ -396,7 +373,7 @@ func (u *UI) handleEvent(ev UIEvent) {
 		if ev.Retry != nil {
 			r := ev.Retry
 			u.write(fmt.Sprintf("%s%sretrying in %s (attempt %d/%d: %s)%s\n",
-				bold, yellow, formatElapsed(r.Delay), r.Attempt, r.MaxRetries, r.Err, reset))
+				render.Bold, render.Yellow, render.FormatElapsed(r.Delay), r.Attempt, r.MaxRetries, r.Err, render.Reset))
 		}
 
 	case uiDebug:
@@ -426,12 +403,12 @@ func (u *UI) renderDebug(ev DebugEvent) {
 	case DebugTurnStart:
 		u.debugLine(fmt.Sprintf("turn %d/%d | %d messages", d.Turn, d.MaxTurns, d.Messages))
 	case DebugTurnDone:
-		s := formatUsage(d.Usage)
+		s := render.FormatUsage(d.Usage)
 		if d.TTFT > time.Millisecond {
-			s += fmt.Sprintf(" | ttft: %s", formatElapsed(d.TTFT))
+			s += fmt.Sprintf(" | ttft: %s", render.FormatElapsed(d.TTFT))
 		}
 		if d.Elapsed > 0 {
-			s += fmt.Sprintf(" | %s", formatElapsed(d.Elapsed))
+			s += fmt.Sprintf(" | %s", render.FormatElapsed(d.Elapsed))
 		}
 		if s != "" {
 			u.debugLine(s)
@@ -442,26 +419,10 @@ func (u *UI) renderDebug(ev DebugEvent) {
 	case DebugMessageCount:
 		u.debugLine(fmt.Sprintf("%d messages", d.Messages))
 	case DebugSummary:
-		s := "total: " + formatUsage(d.Usage)
+		s := "total: " + render.FormatUsage(d.Usage)
 		s += fmt.Sprintf(" | %d messages", d.Messages)
 		u.debugLine(s)
 	}
-}
-
-func formatUsage(u *t.Usage) string {
-	if u == nil {
-		return ""
-	}
-	totalIn := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-	s := fmt.Sprintf("%d in, %d out", totalIn, u.OutputTokens)
-	if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
-		hitPct := 0.0
-		if totalIn > 0 {
-			hitPct = float64(u.CacheReadInputTokens) / float64(totalIn) * 100
-		}
-		s += fmt.Sprintf(" | cache: %.0f%%", hitPct)
-	}
-	return s
 }
 
 // --- Tool progress (streaming args) ---
@@ -484,7 +445,7 @@ func (u *UI) handleToolProgress(name, argsSoFar string) {
 		u.ensureNewline()
 	}
 
-	fmt.Fprintf(stdout, "\r\033[2K%s%s%s %s(%d lines)%s", yellow, name, reset, dim, lines, reset)
+	fmt.Fprintf(stdout, "\r\033[2K%s%s%s %s(%d lines)%s", render.Yellow, name, render.Reset, render.Dim, lines, render.Reset)
 	stdout.Sync()
 	u.hasProgress = true
 }
@@ -522,11 +483,11 @@ func (u *UI) handleToolStart(ev UIEvent) {
 	}
 
 	// Print the initial status line.
-	suffix := fmt.Sprintf(" %s…%s", dim, reset)
-	suffixVis := visibleLen(suffix)
+	suffix := fmt.Sprintf(" %s…%s", render.Dim, render.Reset)
+	suffixVis := render.VisibleLen(suffix)
 	maxLabel := getTermWidth() - suffixVis
-	label := truncateVisible(toolLabel(ev.Name, ev.Args), maxLabel)
-	line := fmt.Sprintf("%s%s%s%s", bold, yellow, label, reset+suffix)
+	label := render.Truncate(toolLabel(ev.Name, ev.Args), maxLabel)
+	line := fmt.Sprintf("%s%s%s%s", render.Bold, render.Yellow, label, render.Reset+suffix)
 	u.write(line + "\n")
 }
 
@@ -569,7 +530,7 @@ func (u *UI) updateToolLine(idx int) {
 	elapsed := time.Since(tl.start)
 	label := toolLabel(tl.name, tl.args)
 
-	elapsedStr := formatElapsed(elapsed)
+	elapsedStr := render.FormatElapsed(elapsed)
 	resultInfo := ""
 	if tl.running && tl.lines > 0 {
 		resultInfo = fmt.Sprintf("(%d lines) ", tl.lines)
@@ -582,20 +543,20 @@ func (u *UI) updateToolLine(idx int) {
 
 	// Build suffix (always shown) and determine space for label
 	var suffix string
-	labelColor := yellow
+	labelColor := render.Yellow
 	if tl.err != nil {
-		labelColor = red
-		suffix = fmt.Sprintf(" %s(error) %s%s", dim, elapsedStr, reset)
+		labelColor = render.Red
+		suffix = fmt.Sprintf(" %s(error) %s%s", render.Dim, elapsedStr, render.Reset)
 	} else {
-		suffix = fmt.Sprintf(" %s%s%s%s", dim, resultInfo, elapsedStr, reset)
+		suffix = fmt.Sprintf(" %s%s%s%s", render.Dim, resultInfo, elapsedStr, render.Reset)
 	}
 
 	// Truncate label to fit: width - suffix_visible - 1 (space after label)
-	suffixVisible := visibleLen(suffix)
+	suffixVisible := render.VisibleLen(suffix)
 	maxLabel := getTermWidth() - suffixVisible - 1
-	label = truncateVisible(label, maxLabel)
+	label = render.Truncate(label, maxLabel)
 
-	fmt.Fprintf(stdout, "%s%s%s%s", bold, labelColor, label, reset+suffix)
+	fmt.Fprintf(stdout, "%s%s%s%s", render.Bold, labelColor, label, render.Reset+suffix)
 
 	if linesUp > 0 {
 		fmt.Fprintf(stdout, "\033[%dB\r", linesUp)
@@ -611,14 +572,6 @@ func (u *UI) refreshToolLines() {
 	}
 }
 
-func formatElapsed(d time.Duration) string {
-	if d < time.Second {
-		ms := d.Milliseconds()
-		return fmt.Sprintf("%dms", ms)
-	}
-	return fmt.Sprintf("%.1fs", d.Seconds())
-}
-
 // --- Pre-approval display (for tools that need confirmation) ---
 
 func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
@@ -629,7 +582,7 @@ func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 	} else {
 		u.ensureNewline()
 	}
-	u.write(fmt.Sprintf("%s%s%s\n", yellow, toolLabel(name, args), reset))
+	u.write(fmt.Sprintf("%s%s%s\n", render.Yellow, toolLabel(name, args), render.Reset))
 }
 
 // --- Approval prompt ---
@@ -637,14 +590,14 @@ func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 func (u *UI) handleToolApproval(ev UIEvent) {
 	var approved bool
 	if u.term != nil {
-		u.term.WriteString(fmt.Sprintf("%s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		u.term.WriteString(fmt.Sprintf("%s%sallow %s? [y/N]%s ", render.Bold, render.Yellow, ev.Name, render.Reset))
 		line, err := u.term.ReadLine("")
 		if err == nil {
 			line = strings.TrimSpace(strings.ToLower(line))
 			approved = line == "y" || line == "yes"
 		}
 	} else {
-		u.write(fmt.Sprintf("%s%sallow %s? [y/N]%s ", bold, yellow, ev.Name, reset))
+		u.write(fmt.Sprintf("%s%sallow %s? [y/N]%s ", render.Bold, render.Yellow, ev.Name, render.Reset))
 		var input string
 		fmt.Scanln(&input)
 		input = strings.TrimSpace(strings.ToLower(input))
@@ -678,7 +631,7 @@ func (u *UI) ensureNewline() {
 // debugLine writes a debug line with a │ prefix to distinguish from tool output.
 func (u *UI) debugLine(text string) {
 	u.ensureNewline()
-	u.write(fmt.Sprintf("%s│ %s%s\n", dimFg, text, reset))
+	u.write(fmt.Sprintf("%s│ %s%s\n", render.DimFg, text, render.Reset))
 }
 
 func getTermWidth() int {
@@ -689,91 +642,13 @@ func getTermWidth() int {
 	return w - 1 // leave 1 col to prevent terminal line wrap
 }
 
-// visibleLen returns the number of visible (non-ANSI-escape) characters in s.
-func visibleLen(s string) int {
-	n := 0
-	inEsc := false
-	for _, r := range s {
-		if inEsc {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
-			}
-			continue
-		}
-		if r == '\033' {
-			inEsc = true
-			continue
-		}
-		n++
-	}
-	return n
-}
-
-// truncateVisible truncates s (which may contain ANSI codes) so the total
-// visible width (including the trailing "…") does not exceed maxVisible.
-func truncateVisible(s string, maxVisible int) string {
-	if maxVisible <= 0 {
-		return ""
-	}
-
-	// First pass: count visible chars to see if truncation is needed.
-	visibleTotal := 0
-	inEsc := false
-	for _, r := range s {
-		if inEsc {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
-			}
-			continue
-		}
-		if r == '\033' {
-			inEsc = true
-			continue
-		}
-		visibleTotal++
-	}
-	if visibleTotal <= maxVisible {
-		return s
-	}
-
-	// Need to truncate: keep maxVisible-1 visible chars + "…"
-	cutoff := maxVisible - 1
-	if cutoff < 0 {
-		cutoff = 0
-	}
-	var out strings.Builder
-	visible := 0
-	inEsc = false
-	for _, r := range s {
-		if inEsc {
-			out.WriteRune(r)
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
-			}
-			continue
-		}
-		if r == '\033' {
-			inEsc = true
-			out.WriteRune(r)
-			continue
-		}
-		if visible >= cutoff {
-			out.WriteString("…" + reset)
-			return out.String()
-		}
-		out.WriteRune(r)
-		visible++
-	}
-	return out.String()
-}
-
 // toolLabel returns a short description like "read agent.go" or "shell $ ls".
 func toolLabel(name string, args map[string]any) string {
 	switch name {
 	case "shell":
 		if cmd, ok := args["command"].(string); ok {
 			cmd = strings.ReplaceAll(cmd, "\n", `\n`)
-			return name + reset + " " + dim + "$ " + cmd
+			return name + render.Reset + " " + render.Dim + "$ " + cmd
 		}
 	case "read":
 		if path, ok := args["path"].(string); ok {
@@ -781,18 +656,18 @@ func toolLabel(name string, args map[string]any) string {
 			limit, hasLimit := args["limit"].(float64)
 			if hasOffset || hasLimit {
 				if hasOffset && hasLimit {
-					return fmt.Sprintf("%s%s %s%s (%d:%d)", name, reset, dim, path, int(offset), int(offset)+int(limit))
+					return fmt.Sprintf("%s%s %s%s (%d:%d)", name, render.Reset, render.Dim, path, int(offset), int(offset)+int(limit))
 				} else if hasOffset {
-					return fmt.Sprintf("%s%s %s%s (%d:)", name, reset, dim, path, int(offset))
+					return fmt.Sprintf("%s%s %s%s (%d:)", name, render.Reset, render.Dim, path, int(offset))
 				} else {
-					return fmt.Sprintf("%s%s %s%s (:%d)", name, reset, dim, path, int(limit))
+					return fmt.Sprintf("%s%s %s%s (:%d)", name, render.Reset, render.Dim, path, int(limit))
 				}
 			}
-			return name + reset + " " + dim + path
+			return name + render.Reset + " " + render.Dim + path
 		}
 	case "write":
 		if path, ok := args["path"].(string); ok {
-			return name + reset + " " + dim + path
+			return name + render.Reset + " " + render.Dim + path
 		}
 	case "edit":
 		if path, ok := args["path"].(string); ok {
@@ -800,11 +675,11 @@ func toolLabel(name string, args map[string]any) string {
 			nw, _ := args["new_string"].(string)
 			oldLines := strings.Count(old, "\n") + 1
 			newLines := strings.Count(nw, "\n") + 1
-			return fmt.Sprintf("%s%s %s%s (-%d +%d)", name, reset, dim, path, oldLines, newLines)
+			return fmt.Sprintf("%s%s %s%s (-%d +%d)", name, render.Reset, render.Dim, path, oldLines, newLines)
 		}
 	case "use_skill":
 		if skill, ok := args["name"].(string); ok {
-			return name + reset + " " + dim + skill
+			return name + render.Reset + " " + render.Dim + skill
 		}
 	case "subagent":
 		if task, ok := args["task"].(string); ok {
@@ -812,7 +687,7 @@ func toolLabel(name string, args map[string]any) string {
 			if len(display) > 60 {
 				display = display[:60] + "…"
 			}
-			return name + reset + " " + dim + display
+			return name + render.Reset + " " + render.Dim + display
 		}
 	case "compact":
 		return name

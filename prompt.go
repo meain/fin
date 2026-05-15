@@ -7,11 +7,14 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	finembed "github.com/meain/fin/internal/embed"
+	"github.com/meain/fin/internal/fsutil"
 )
 
 func buildSystemPrompt(config *Config, skills []*Skill, sessionID string, enabled map[string]bool) string {
 	var b strings.Builder
-	b.WriteString(gateSystemPrompt(baseSystemPrompt, enabled))
+	b.WriteString(gateSystemPrompt(finembed.SystemPrompt, enabled))
 
 	// Runtime context
 	cwd, _ := os.Getwd()
@@ -117,24 +120,16 @@ func findProjectFile(name string) string {
 		return ""
 	}
 
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	for {
-		path := filepath.Join(dir, name)
-		data, err := os.ReadFile(path)
+	var found string
+	fsutil.WalkUpFromCwd(func(dir string) {
+		if found != "" {
+			return
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err == nil {
-			return strings.TrimSpace(string(data))
+			found = strings.TrimSpace(string(data))
 		}
+	})
 
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return ""
+	return found
 }

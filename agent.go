@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	finembed "github.com/meain/fin/internal/embed"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
@@ -120,7 +121,7 @@ func filterTools(tools []tool.Tool, enabled map[string]bool) []tool.Tool {
 func loadBuiltinSkills() []tool.SkillEntry {
 	var entries []tool.SkillEntry
 
-	dirs, err := builtinSkillsFS.ReadDir("skills")
+	dirs, err := finembed.BuiltinSkillsFS.ReadDir("skills")
 	if err != nil {
 		return entries
 	}
@@ -129,7 +130,7 @@ func loadBuiltinSkills() []tool.SkillEntry {
 		if !d.IsDir() {
 			continue
 		}
-		data, err := builtinSkillsFS.ReadFile("skills/" + d.Name() + "/" + skillFile)
+		data, err := finembed.BuiltinSkillsFS.ReadFile("skills/" + d.Name() + "/" + skillFile)
 		if err != nil {
 			continue
 		}

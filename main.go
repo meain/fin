@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meain/fin/internal/provider"
+	"github.com/meain/fin/internal/render"
 	t "github.com/meain/fin/internal/types"
 	"golang.org/x/term"
 )
@@ -49,10 +50,10 @@ func main() {
 
 	switch *colorMode {
 	case "never":
-		disableColors()
+		render.Disable()
 	case "auto":
 		if _, ok := os.LookupEnv("NO_COLOR"); ok || !term.IsTerminal(int(os.Stdout.Fd())) {
-			disableColors()
+			render.Disable()
 		}
 	case "always":
 		// colors stay enabled
@@ -371,9 +372,9 @@ func promptSessionMatch(query string) *Session {
 
 	if len(matches) == 1 {
 		m := matches[0]
-		age := relativeTime(lastMessageTime(m.Session))
+		age := render.RelativeTime(lastMessageTime(m.Session))
 		fmt.Fprintf(os.Stderr, "%ssimilar session:%s %s %s(%s)%s\n",
-			dim, reset, m.Session.Title, dim, age, reset)
+			render.Dim, render.Reset, m.Session.Title, render.Dim, age, render.Reset)
 		fmt.Fprintf(os.Stderr, "continue? [y/N] ")
 		var input string
 		fmt.Scanln(&input)
@@ -383,11 +384,11 @@ func promptSessionMatch(query string) *Session {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "%ssimilar sessions:%s\n", dim, reset)
+	fmt.Fprintf(os.Stderr, "%ssimilar sessions:%s\n", render.Dim, render.Reset)
 	for i, m := range matches {
-		age := relativeTime(lastMessageTime(m.Session))
+		age := render.RelativeTime(lastMessageTime(m.Session))
 		fmt.Fprintf(os.Stderr, "  %d. %s %s(%s)%s\n",
-			i+1, m.Session.Title, dim, age, reset)
+			i+1, m.Session.Title, render.Dim, age, render.Reset)
 	}
 	fmt.Fprintf(os.Stderr, "continue [1")
 	for i := range matches[1:] {

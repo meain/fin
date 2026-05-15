@@ -364,34 +364,6 @@ func TestSessionWriter_SetTitleTriggersRewrite(t *testing.T) {
 	}
 }
 
-func TestRelativeTime_Now(t *testing.T) {
-	result := relativeTime(time.Now())
-	if result != "now" {
-		t.Errorf("expected %q, got %q", "now", result)
-	}
-}
-
-func TestRelativeTime_Minutes(t *testing.T) {
-	result := relativeTime(time.Now().Add(-5 * time.Minute))
-	if result != "5m" {
-		t.Errorf("expected %q, got %q", "5m", result)
-	}
-}
-
-func TestRelativeTime_Hours(t *testing.T) {
-	result := relativeTime(time.Now().Add(-3 * time.Hour))
-	if result != "3h" {
-		t.Errorf("expected %q, got %q", "3h", result)
-	}
-}
-
-func TestRelativeTime_Days(t *testing.T) {
-	result := relativeTime(time.Now().Add(-48 * time.Hour))
-	if result != "2d" {
-		t.Errorf("expected %q, got %q", "2d", result)
-	}
-}
-
 func TestLastMessageTime_ReturnsLastTimestamp(t *testing.T) {
 	now := time.Now()
 	earlier := now.Add(-10 * time.Minute)

@@ -1,10 +1,6 @@
 package types
 
-import (
-	"os"
-	"path/filepath"
-	"time"
-)
+import "time"
 
 // Role represents the sender of a message in a conversation.
 type Role string
@@ -86,14 +82,3 @@ type ToolResult struct {
 	SubMessages []Message // subagent conversation (for export)
 }
 
-// ExpandHome expands ~/... paths to the user's home directory.
-func ExpandHome(path string) string {
-	if len(path) >= 2 && path[:2] == "~/" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(home, path[2:])
-	}
-	return path
-}

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/meain/fin/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,23 +58,15 @@ func DiscoverSkills(config *Config) []*Skill {
 	seen := map[string]bool{}
 
 	// 1. Project-level: .agents/skills/ in cwd and parent dirs
-	if dir, err := os.Getwd(); err == nil {
-		for {
-			skillsDir := filepath.Join(dir, agentsDir, skillsDirName)
-			for _, s := range scanSkillsDir(skillsDir) {
-				if !seen[s.Name] {
-					seen[s.Name] = true
-					skills = append(skills, s)
-				}
+	fsutil.WalkUpFromCwd(func(dir string) {
+		skillsDir := filepath.Join(dir, agentsDir, skillsDirName)
+		for _, s := range scanSkillsDir(skillsDir) {
+			if !seen[s.Name] {
+				seen[s.Name] = true
+				skills = append(skills, s)
 			}
-
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
 		}
-	}
+	})
 
 	// 2. User-level: ~/.agents/skills/
 	if h := homeDir(); h != "" {

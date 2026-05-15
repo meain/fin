@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
 )
 
@@ -51,7 +52,7 @@ func (et *EditTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	if oldStr == "" {
 		return t.ToolResult{}, fmt.Errorf("old_string is required")
 	}
-	path = t.ExpandHome(path)
+	path = fsutil.ExpandHome(path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
