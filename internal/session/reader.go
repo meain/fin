@@ -53,6 +53,7 @@ func readFile(path string) (*Session, error) {
 		Cwd:             header.Cwd,
 		Name:            header.Name,
 		PreviousSession: header.PreviousSession,
+		Temp:            header.Temp,
 		StartedAt:       header.StartedAt,
 	}
 

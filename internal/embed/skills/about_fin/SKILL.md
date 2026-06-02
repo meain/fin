@@ -37,6 +37,7 @@ fin -config <path>                     # override config file location
 fin -f script.fin                      # read prompt from file (strips shebang line)
 fin -f script.fin "extra args"         # file prompt + positional args appended
 fin -tools read,shell "prompt"         # restrict tool set (also: all, none)
+fin -temp "quick question"             # mark session as temporary (skipped by -c, shown as [temp] in listings)
 ```
 
 ## Shebang scripts

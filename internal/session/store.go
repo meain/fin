@@ -19,10 +19,12 @@ type entry struct {
 	path  string
 	name  string
 	mtime time.Time
+	temp  bool
 }
 
 // entries returns all .jsonl session files in the sessions dir, sorted by
 // mtime descending. No JSON parsing — uses only dirent + stat.
+// Detects temp sessions from the _temp filename suffix.
 func entries() ([]entry, error) {
 	dir := config.SessionPath()
 	es, err := os.ReadDir(dir)
@@ -38,19 +40,37 @@ func entries() ([]entry, error) {
 		if err != nil {
 			continue
 		}
+		temp := strings.Contains(e.Name(), "_temp")
 		out = append(out, entry{
 			path:  filepath.Join(dir, e.Name()),
 			name:  e.Name(),
 			mtime: info.ModTime(),
+			temp:  temp,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].mtime.After(out[j].mtime) })
 	return out, nil
 }
 
-// LoadByIndex loads the Nth most recent session (1-based).
+// permanentEntries returns non-temp session entries, sorted by mtime descending.
+func permanentEntries() ([]entry, error) {
+	all, err := entries()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entry, 0, len(all))
+	for _, e := range all {
+		if !e.temp {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// LoadByIndex loads the Nth most recent permanent session (1-based). Temp
+// sessions are skipped for index lookup; use LoadByID for temp sessions.
 func LoadByIndex(index int) (*Session, error) {
-	es, err := entries()
+	es, err := permanentEntries()
 	if err != nil || len(es) == 0 {
 		return nil, fmt.Errorf("no sessions found")
 	}
@@ -60,7 +80,7 @@ func LoadByIndex(index int) (*Session, error) {
 	return readFile(es[index-1].path)
 }
 
-// LoadByID loads a session by its UUID (or unique prefix).
+// LoadByID loads a session by its UUID (or unique prefix). Includes temp sessions.
 func LoadByID(id string) (*Session, error) {
 	es, err := entries()
 	if err != nil {
@@ -88,9 +108,9 @@ func LoadByName(name string) (*Session, error) {
 	return readFile(matches[len(matches)-1])
 }
 
-// LoadLast loads the most recently modified session.
+// LoadLast loads the most recently modified permanent (non-temp) session.
 func LoadLast() (*Session, error) {
-	es, err := entries()
+	es, err := permanentEntries()
 	if err != nil || len(es) == 0 {
 		return nil, fmt.Errorf("no sessions found")
 	}
@@ -134,6 +154,7 @@ type Summary struct {
 	Title        string    `json:"title"`
 	Model        string    `json:"model"`
 	Name         string    `json:"name,omitempty"`
+	Temp         bool      `json:"temp,omitempty"`
 	StartedAt    time.Time `json:"started_at"`
 	MessageCount int       `json:"message_count"`
 	LastActivity time.Time `json:"last_activity"`
@@ -155,6 +176,7 @@ func SummariesJSON(sessions []Session) ([]byte, error) {
 			Title:        sess.Title,
 			Model:        sess.Model,
 			Name:         sess.Name,
+			Temp:         sess.Temp,
 			StartedAt:    sess.StartedAt,
 			MessageCount: msgCount,
 			LastActivity: LastMessageTime(sess),

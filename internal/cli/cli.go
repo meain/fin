@@ -50,6 +50,7 @@ func Run() int {
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
 	promptFile := flag.String("f", "", "read prompt from file (for shebang scripts)")
 	toolsFlag := flag.String("tools", "", "tools to enable: all, none, or comma-separated list (e.g. read,shell)")
+	temp := flag.Bool("temp", false, "mark session as temporary (skipped by -c, -sessions shows [temp])")
 	flag.Parse()
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -247,10 +248,10 @@ func Run() int {
 	}
 	if sw == nil {
 		if *name != "" {
-			sw = session.NewWriter(sessionID, fullModel, *name)
+			sw = session.NewWriter(sessionID, fullModel, *name, *temp)
 			u.SessionInfo(agent.SessionInfoData{Label: *name})
 		} else {
-			sw = session.NewWriter(sessionID, fullModel, "")
+			sw = session.NewWriter(sessionID, fullModel, "", *temp)
 		}
 	}
 	var saveWarned bool
@@ -262,7 +263,7 @@ func Run() int {
 	}
 	ag.OnCompact = func() {
 		prevID := sw.ID()
-		sw = session.NewWriter("", fullModel, "")
+		sw = session.NewWriter("", fullModel, "", false)
 		sw.SetPreviousSession(prevID)
 	}
 
@@ -408,6 +409,9 @@ func printSessions(limit int, since time.Time) {
 		short := sess.ID[:8]
 		if sess.Name != "" {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
+		}
+		if sess.Temp {
+			short = short + render.Dim + " [temp]" + render.Reset
 		}
 
 		counter := fmt.Sprintf("%d.", idx+1)

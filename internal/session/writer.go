@@ -25,6 +25,7 @@ type Writer struct {
 	name            string
 	previousSession string
 	title           string // LLM-generated title override
+	temp            bool
 	started         time.Time
 	filepath        string
 
@@ -36,7 +37,7 @@ type Writer struct {
 
 // NewWriter creates a new session file and returns a writer for incremental
 // saves. If id is empty, a new UUID is generated.
-func NewWriter(id, model, name string) *Writer {
+func NewWriter(id, model, name string, temp bool) *Writer {
 	dir := config.SessionPath()
 	os.MkdirAll(dir, 0755)
 
@@ -44,17 +45,22 @@ func NewWriter(id, model, name string) *Writer {
 		id = uuid.New().String()
 	}
 	cwd, _ := os.Getwd()
-	filename := fmt.Sprintf("%s_%s.jsonl", time.Now().Format("20060102-150405"), id)
+	suffix := ""
+	if temp {
+		suffix = "_temp"
+	}
+	filename := fmt.Sprintf("%s_%s%s.jsonl", time.Now().Format("20060102-150405"), id, suffix)
 	if name != "" {
-		filename = fmt.Sprintf("%s_%s_%s.jsonl", time.Now().Format("20060102-150405"), id, name)
+		filename = fmt.Sprintf("%s_%s_%s%s.jsonl", time.Now().Format("20060102-150405"), id, name, suffix)
 	}
 
 	return &Writer{
-		id:       id,
-		model:    model,
-		cwd:      cwd,
-		name:     name,
-		started:  time.Now(),
+		id:      id,
+		model:   model,
+		cwd:     cwd,
+		name:    name,
+		temp:    temp,
+		started: time.Now(),
 		filepath: filepath.Join(dir, filename),
 	}
 }
@@ -84,6 +90,7 @@ func WriterForExisting(sess *Session) *Writer {
 		name:            sess.Name,
 		previousSession: sess.PreviousSession,
 		title:           sess.Title,
+		temp:            sess.Temp,
 		started:         sess.StartedAt,
 		filepath:        fp,
 		headerDirty:     true,
@@ -187,6 +194,7 @@ func (w *Writer) fullRewrite(messages []t.Message) error {
 		Cwd:             w.cwd,
 		Name:            w.name,
 		PreviousSession: w.previousSession,
+		Temp:            w.temp,
 		StartedAt:       w.started,
 	}
 

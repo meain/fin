@@ -104,7 +104,7 @@ func FindMatching(query string, limit int, minScore float64, mc config.MatchingC
 		return nil
 	}
 
-	es, err := entries()
+	es, err := permanentEntries()
 	if err != nil || len(es) == 0 {
 		return nil
 	}

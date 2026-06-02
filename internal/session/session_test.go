@@ -132,7 +132,7 @@ func TestWriter_ResumeAppends(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	w := NewWriter("resume-id", "m", "")
+	w := NewWriter("resume-id", "m", "", false)
 	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestWriter_ResumeDetectsExternalWrite(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	w := NewWriter("ext-test", "m", "")
+	w := NewWriter("ext-test", "m", "", false)
 	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
