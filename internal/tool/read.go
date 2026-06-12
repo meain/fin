@@ -22,9 +22,7 @@ var imageExtensions = map[string]string{
 }
 
 // ReadTool reads files, images, or directory structures.
-type ReadTool struct {
-	tracker *FileTracker
-}
+type ReadTool struct{}
 
 func (rt *ReadTool) Name() string { return "read" }
 
@@ -84,9 +82,6 @@ func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	}
 
 	content, err := readFile(path, args)
-	if err == nil && rt.tracker != nil {
-		rt.tracker.RecordRead(path)
-	}
 	return t.ToolResult{Content: content}, err
 }
 

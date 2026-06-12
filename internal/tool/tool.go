@@ -39,11 +39,10 @@ func Find(tools []Tool, name string) Tool {
 
 // BuiltinTools returns the built-in tool set.
 func BuiltinTools() []Tool {
-	ft := newFileTracker()
 	return []Tool{
-		&ReadTool{tracker: ft},
+		&ReadTool{},
 		&WriteTool{},
-		&EditTool{tracker: ft},
+		&EditTool{},
 		&ShellTool{},
 		&CompactTool{},
 	}
@@ -51,11 +50,10 @@ func BuiltinTools() []Tool {
 
 // SubagentTools returns the tool set available to subagents.
 func SubagentTools() []Tool {
-	ft := newFileTracker()
 	return []Tool{
-		&ReadTool{tracker: ft},
+		&ReadTool{},
 		&WriteTool{},
-		&EditTool{tracker: ft},
+		&EditTool{},
 		&ShellTool{},
 	}
 }
