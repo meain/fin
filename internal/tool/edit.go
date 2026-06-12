@@ -12,7 +12,9 @@ import (
 )
 
 // EditTool edits a file by replacing an exact string match.
-type EditTool struct{}
+type EditTool struct {
+	tracker *FileTracker
+}
 
 func (et *EditTool) Name() string { return "edit" }
 
@@ -66,6 +68,12 @@ func (et *EditTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	}
 	path = fsutil.ExpandHome(path)
 
+	if et.tracker != nil {
+		if err := et.tracker.CheckWrite(path); err != nil {
+			return t.ToolResult{}, err
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return t.ToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
@@ -86,6 +94,9 @@ func (et *EditTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 		return t.ToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 	}
 
+	if et.tracker != nil {
+		et.tracker.RecordRead(path)
+	}
 	return t.ToolResult{Content: fmt.Sprintf("edited %s", path)}, nil
 }
 
