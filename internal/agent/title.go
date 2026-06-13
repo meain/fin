@@ -18,10 +18,14 @@ func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
 		return "", nil
 	}
 
+	// Use the last user message, not the first. For new sessions both are the
+	// same (only one user message exists at title-generation time). For forks,
+	// SetMessages copies the parent history first, so the first user message
+	// is the parent's opener — the last is the actual fork prompt.
 	var userMsg string
-	for _, m := range a.messages {
-		if m.Role == t.RoleUser {
-			userMsg = m.Content
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == t.RoleUser {
+			userMsg = a.messages[i].Content
 			break
 		}
 	}
