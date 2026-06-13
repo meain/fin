@@ -54,6 +54,7 @@ func Run() int {
 	toolsFlag := flag.String("tools", "", "tools to enable: all, none, or comma-separated list (e.g. read,shell)")
 	temp := flag.Bool("temp", false, "mark session as temporary (skipped by -c, -sessions shows [temp])")
 	fork := flag.Bool("fork", false, "fork the current (or -s/-n) session into a new one and continue")
+	secondaryModel := flag.String("secondary-model", "", "model for title generation (overrides config)")
 	flag.Parse()
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -160,6 +161,9 @@ func Run() int {
 	modelStr := *model
 	if modelStr == "" {
 		modelStr = cfg.Models.Primary
+	}
+	if *secondaryModel != "" {
+		cfg.Models.Secondary = *secondaryModel
 	}
 
 	outMode := ui.ParseOutputMode(cfg.Settings.UI)
