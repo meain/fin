@@ -33,11 +33,9 @@ func renderMarkdown(src string) string {
 	return buf.String()
 }
 
-// JSON writes the session chain as a JSON array to w. For a single session
-// with no parent the chain has one element; for forked sessions it includes
-// all ancestors ordered root-first.
-func JSON(chain []*session.Session, w io.Writer) {
-	data, err := json.MarshalIndent(chain, "", "  ")
+// JSON writes the session as formatted JSON to w.
+func JSON(sess *session.Session, w io.Writer) {
+	data, err := json.MarshalIndent(sess, "", "  ")
 	if err != nil {
 		fmt.Fprintf(w, "error: %s\n", err)
 		return
@@ -46,42 +44,23 @@ func JSON(chain []*session.Session, w io.Writer) {
 	w.Write([]byte("\n"))
 }
 
-// HTML writes the session chain as a self-contained HTML page to w. Each
-// session in the chain is rendered as a titled section, ordered root-first.
-func HTML(chain []*session.Session, w io.Writer) {
-	last := chain[len(chain)-1]
-	title := last.Title
+// HTML writes the session as a self-contained HTML page to w. For forked
+// sessions the full transcript is already present in sess.Messages (copied
+// from the parent at fork time), so no chain walking is needed.
+func HTML(sess *session.Session, w io.Writer) {
+	title := sess.Title
 	if title == "" {
 		title = "fin session"
 	}
-	writeHTMLHead(w, title, last)
+	writeHTMLHead(w, title, sess)
 
 	opts := renderOpts{
 		UserLabel:      "you",
 		CollapseLabels: true,
+		ToolMap:        buildToolCallMap(sess.Messages),
 		ExpandSubagent: true,
 	}
-
-	for i, sess := range chain {
-		sectionTitle := sess.Title
-		if sectionTitle == "" {
-			sectionTitle = "session " + sess.ID[:8]
-		}
-		if len(chain) > 1 {
-			label := sectionTitle
-			if i == 0 {
-				label = "Root: " + sectionTitle
-			} else {
-				label = "↳ Fork: " + sectionTitle
-			}
-			fmt.Fprintf(w, `<div class="fork-header">%s</div>`+"\n", html.EscapeString(label))
-		}
-		opts.ToolMap = buildToolCallMap(sess.Messages)
-		renderMessageList(w, sess.Messages, opts)
-		if i < len(chain)-1 {
-			fmt.Fprint(w, `<div class="fork-divider"></div>`+"\n")
-		}
-	}
+	renderMessageList(w, sess.Messages, opts)
 
 	fmt.Fprint(w, "<script>hljs.highlightAll();</script>\n</body>\n</html>\n")
 }
@@ -147,8 +126,6 @@ func writeHTMLHead(w io.Writer, title string, sess *session.Session) {
   .diff { font-family: monospace; font-size: 0.85rem; margin-top: 0.25rem; border-radius: 6px; overflow-y: auto; max-height: 300px; }
   .diff pre { background: none; margin: 0; padding: 0; border-radius: 0; }
   .diff pre code { background: none; padding: 0; font-size: inherit; }
-  .fork-header { font-size: 0.8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin: 2rem 0 0.75rem; }
-  .fork-divider { border-top: 2px dashed #e5e7eb; margin: 2rem 0; }
 </style>
 `,
 		html.EscapeString(title),

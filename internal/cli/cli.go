@@ -124,9 +124,9 @@ func Run() int {
 		}
 		switch *exportFlag {
 		case "json":
-			export.JSON(session.LoadChain(sess), os.Stdout)
+			export.JSON(sess, os.Stdout)
 		case "html":
-			export.HTML(session.LoadChain(sess), os.Stdout)
+			export.HTML(sess, os.Stdout)
 		case "message":
 			for i := len(sess.Messages) - 1; i >= 0; i-- {
 				if sess.Messages[i].Role == t.RoleAssistant && sess.Messages[i].Content != "" {
