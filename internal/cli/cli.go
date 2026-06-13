@@ -22,6 +22,7 @@ import (
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/session"
 	"github.com/meain/fin/internal/skill"
+	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
 	"github.com/meain/fin/internal/ui"
 	"golang.org/x/term"
@@ -502,9 +503,11 @@ func parseToolsFlag(v string) (map[string]bool, error) {
 		return map[string]bool{}, nil
 	}
 
-	valid := map[string]bool{
-		"read": true, "write": true, "edit": true, "shell": true,
-		"compact": true, "use_skill": true, "subagent": true,
+	valid := map[string]bool{}
+	validNames := []string{}
+	for _, tl := range tool.BuiltinTools() {
+		valid[tl.Name()] = true
+		validNames = append(validNames, tl.Name())
 	}
 	out := map[string]bool{}
 	for _, name := range strings.Split(v, ",") {
@@ -513,7 +516,7 @@ func parseToolsFlag(v string) (map[string]bool, error) {
 			continue
 		}
 		if !valid[name] {
-			return nil, fmt.Errorf("unknown tool %q (valid: read, write, edit, shell, compact, use_skill, subagent)", name)
+			return nil, fmt.Errorf("unknown tool %q (valid: %s)", name, strings.Join(validNames, ", "))
 		}
 		out[name] = true
 	}
