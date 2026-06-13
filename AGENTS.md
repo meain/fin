@@ -19,11 +19,11 @@ internal/
                provider_factory.go   # NewProviderInjector (wraps provider w/ fixed model), newProviderForModel
                uiwriter.go           # UIWriter interface + Debug* payloads + SessionInfoData + RetryData + nullUI
   ui/          ui.go                 # Terminal UIWriter impl: ANSI codes, cursor moves, parallel-tool state, debug renderer, approval prompt
-  export/      export.go             # JSON, HTML (with markdown rendering, foldable tool results, edit diffs), shared renderMessage for main + subagent
+  export/      export.go             # JSON, HTML (with markdown rendering, foldable tool results, edit diffs), chain-aware export (walks ancestor chain root-first), shared renderMessage for main + subagent
   session/     session.go            # Session, sessionHeader (twin kept — append perf), TitleFromFirstMessage, LastMessageTime
                writer.go             # Writer, NewWriter, WriterForExisting, Save, fullRewrite, appendNew, ErrConflict (mtime guard)
                reader.go             # readFile (tolerates truncated trailing line), parseFiles (parallel), uuidFromFilename
-               store.go              # entries, LoadByID/Index/Name/Last, LoadSummaries, SummariesJSON, ParseSince
+               store.go              # entries, LoadByID/Index/Name/Last/Chain, LoadSummaries, SummariesJSON, ParseSince
                match.go              # FindMatching, scoreSession, extractKeywords, stopWords
   skill/       skill.go              # Skill, ParseMD, Discover (walks up cwd, then ~), scanDir
   prompt/      prompt.go             # BuildSystem (gates base prompt by enabled tools)
@@ -122,6 +122,7 @@ fin -color auto|always|never    # color output
 fin -config <path>              # override config file path
 fin -fork "prompt"              # fork the last session into a new one, continue with prompt
 fin -s <uuid> -fork "prompt"    # fork a specific session
+fin -secondary-model provider/model "prompt"  # override secondary model (title generation)
 ```
 
 ## Config
@@ -133,7 +134,7 @@ TOML at `~/.config/fin/config.toml`:
 - `[settings.matching]` — `title_weight` (default 3), `content_cap` (default 5), `recency_decay_d` (default 7), `recency_bonus` (default 0.5)
 - `[model_aliases]` — short names mapping to `provider/model` (alias chains resolved up to 10 hops)
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`
-- `[tools.*]` — `approval` (auto/confirm/deny), `allow`/`deny` glob patterns for shell
+- `[tools.*]` — `approval` (auto/confirm/deny), `allow`/`deny` glob patterns for shell, `max_output_bytes` (spill large output to `/tmp/fin/<id>.txt`)
 
 ## Adding a new provider
 
