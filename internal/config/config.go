@@ -51,9 +51,10 @@ type ProviderConfig struct {
 
 // ToolConfig configures a single tool's approval policy and shell allow/deny lists.
 type ToolConfig struct {
-	Approval string   `toml:"approval"` // "auto", "confirm", "deny"
-	Allow    []string `toml:"allow"`    // glob patterns (shell tool)
-	Deny     []string `toml:"deny"`     // glob patterns (shell tool)
+	Approval       string   `toml:"approval"`         // "auto", "confirm", "deny"
+	Allow          []string `toml:"allow"`             // glob patterns (shell tool)
+	Deny           []string `toml:"deny"`              // glob patterns (shell tool)
+	MaxOutputBytes int      `toml:"max_output_bytes"`  // 0 = unlimited
 }
 
 // Default returns the built-in defaults used when no config file exists.

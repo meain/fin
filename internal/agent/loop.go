@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -197,12 +199,31 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 		case r.err != nil:
 			msg.Content = "Error: " + r.err.Error()
 		default:
-			msg.Content = r.result.Content
+			msg.Content = a.maybeSpillOutput(item.tc.Name, item.tc.ID, r.result.Content)
 			msg.Images = r.result.Images
 			msg.SubMessages = r.result.SubMessages
 		}
 		a.messages = append(a.messages, msg)
 	}
+}
+
+// maybeSpillOutput checks if content exceeds the configured max_output_bytes
+// for the tool. If so, writes the full output to /tmp/fin/<id>.txt and
+// returns a truncated version with a pointer to the file.
+func (a *Agent) maybeSpillOutput(toolName, callID, content string) string {
+	cfg, ok := a.config.Tools[toolName]
+	if !ok || cfg.MaxOutputBytes <= 0 || len(content) <= cfg.MaxOutputBytes {
+		return content
+	}
+
+	dir := filepath.Join(os.TempDir(), "fin")
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, callID+".txt")
+	_ = os.WriteFile(path, []byte(content), 0644)
+
+	truncated := content[:cfg.MaxOutputBytes]
+	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output written to %s — use the Read tool to view it if needed.]",
+		truncated, cfg.MaxOutputBytes, path)
 }
 
 // consumeStream drains a stream, accumulating text, tool-call fragments,
