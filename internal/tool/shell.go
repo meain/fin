@@ -25,6 +25,11 @@ type ShellTool struct {
 
 func (st *ShellTool) Name() string { return "shell" }
 
+func (st *ShellTool) PrimaryArg(args map[string]any) string {
+	cmd, _ := args["command"].(string)
+	return cmd
+}
+
 func (st *ShellTool) Label(args map[string]any) ToolLabel {
 	cmd, _ := args["command"].(string)
 	if cmd == "" {

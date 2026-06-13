@@ -26,6 +26,11 @@ type ReadTool struct{}
 
 func (rt *ReadTool) Name() string { return "read" }
 
+func (rt *ReadTool) PrimaryArg(args map[string]any) string {
+	path, _ := args["path"].(string)
+	return path
+}
+
 func (rt *ReadTool) Description() string {
 	return "Read the contents of a file, an image, or list the structure of a directory. Returns file content with line numbers, image data for vision models, or a directory tree."
 }

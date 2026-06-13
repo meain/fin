@@ -16,6 +16,11 @@ type EditTool struct{}
 
 func (et *EditTool) Name() string { return "edit" }
 
+func (et *EditTool) PrimaryArg(args map[string]any) string {
+	path, _ := args["path"].(string)
+	return path
+}
+
 func (et *EditTool) Description() string {
 	return "Edit a file by replacing an exact string match. The old_string must appear exactly once in the file. Use this for surgical edits rather than rewriting entire files."
 }

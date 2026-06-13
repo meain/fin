@@ -195,9 +195,9 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 		}
 		switch {
 		case item.err != nil:
-			msg.Content = "Error: " + item.err.Error()
+			msg.Content = errorWithContext(item.tool, item.tc.Name, item.args, item.err)
 		case r.err != nil:
-			msg.Content = "Error: " + r.err.Error()
+			msg.Content = errorWithContext(item.tool, item.tc.Name, item.args, r.err)
 		default:
 			msg.Content = a.maybeSpillOutput(item.tc.Name, item.tc.ID, r.result.Content)
 			msg.Images = r.result.Images
@@ -224,6 +224,18 @@ func (a *Agent) maybeSpillOutput(toolName, callID, content string) string {
 	truncated := content[:cfg.MaxOutputBytes]
 	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output written to %s — use the Read tool to view it if needed.]",
 		truncated, cfg.MaxOutputBytes, path)
+}
+
+// errorWithContext formats a tool error with the tool name and primary arg
+// (e.g. "Error (edit /path/to/file): ...") so failures are easier to trace.
+func errorWithContext(tl tool.Tool, name string, args map[string]any, err error) string {
+	context := name
+	if p, ok := tl.(tool.PrimaryArgProvider); ok {
+		if primary := p.PrimaryArg(args); primary != "" {
+			context = name + " " + primary
+		}
+	}
+	return fmt.Sprintf("Error (%s): %s", context, err.Error())
 }
 
 // consumeStream drains a stream, accumulating text, tool-call fragments,

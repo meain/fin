@@ -19,6 +19,11 @@ func (wt *WriteTool) Description() string {
 	return "Write content to a file. Creates the file and any parent directories if they don't exist. Overwrites existing content."
 }
 
+func (wt *WriteTool) PrimaryArg(args map[string]any) string {
+	path, _ := args["path"].(string)
+	return path
+}
+
 func (wt *WriteTool) Label(args map[string]any) ToolLabel {
 	path, _ := args["path"].(string)
 	return ToolLabel{Primary: path}

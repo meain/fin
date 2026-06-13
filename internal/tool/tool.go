@@ -14,6 +14,12 @@ type Tool interface {
 	Run(ctx context.Context, args map[string]any) (t.ToolResult, error)
 }
 
+// PrimaryArgProvider is an optional interface tools can implement to expose
+// their most meaningful argument for error context (e.g. file path, command).
+type PrimaryArgProvider interface {
+	PrimaryArg(args map[string]any) string
+}
+
 // Defs converts tools to the ToolDef format used in completion requests.
 func Defs(tools []Tool) []t.ToolDef {
 	defs := make([]t.ToolDef, len(tools))
