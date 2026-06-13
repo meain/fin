@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	t "github.com/meain/fin/internal/types"
@@ -74,7 +75,9 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// Use plain exec.Command so we control shutdown sequencing ourselves.
+	// exec.CommandContext would send SIGKILL immediately on cancellation.
+	cmd := exec.Command("sh", "-c", command)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -115,9 +118,26 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 		defer wg.Done()
 		io.Copy(&stderrBuf, stderrPipe)
 	}()
-	wg.Wait()
 
+	// Watch for context cancellation and shut down gracefully:
+	// SIGTERM first, then SIGKILL after 2s if still running.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			cmd.Process.Signal(syscall.SIGTERM)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				cmd.Process.Kill()
+			}
+		case <-done:
+		}
+	}()
+
+	wg.Wait()
 	err = cmd.Wait()
+	close(done)
 
 	var result string
 	if stdout.Len() > 0 {
