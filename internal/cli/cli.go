@@ -361,7 +361,11 @@ func Run() int {
 			defer close(titleDone)
 			titleCtx, titleCancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer titleCancel()
-			if title, err := ag.GenerateTitle(titleCtx); err == nil && title != "" {
+			parentTitle := ""
+			if forkParentID != "" && resumedSession != nil {
+				parentTitle = resumedSession.Title
+			}
+			if title, err := ag.GenerateTitle(titleCtx, parentTitle); err == nil && title != "" {
 				sw.SetTitle(title)
 				_ = sw.Save(ag.Messages())
 			}

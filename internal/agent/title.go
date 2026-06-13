@@ -10,9 +10,10 @@ import (
 )
 
 // GenerateTitle asks the secondary model to produce a short session title
-// from the first user message. Returns "" when no secondary model is
-// configured or when the conversation has no user message yet.
-func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
+// from the last user message. parentTitle, when non-empty, is included so
+// forked sessions get a title that reflects both origin and new direction.
+// Returns "" when no secondary model is configured or there is no user message.
+func (a *Agent) GenerateTitle(ctx context.Context, parentTitle string) (string, error) {
 	tm := a.config.Models.Secondary
 	if tm == "" {
 		return "", nil
@@ -37,7 +38,11 @@ func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
 		userMsg = userMsg[:300]
 	}
 
-	prompt := "Generate a concise 3-7 word title describing what the user is asking about. Use sentence case (only first word and proper nouns capitalized). Do not answer the question. Reply with ONLY the title, no quotes or punctuation.\n\nUser: " + userMsg
+	prompt := "Generate a concise 3-7 word title describing what the user is asking about. Use sentence case (only first word and proper nouns capitalized). Do not answer the question. Reply with ONLY the title, no quotes or punctuation."
+	if parentTitle != "" {
+		prompt += "\n\nThis is a fork of a session titled: " + parentTitle
+	}
+	prompt += "\n\nUser: " + userMsg
 
 	p, _, err := newProviderForModel(a.config, tm)
 	if err != nil {
