@@ -350,8 +350,9 @@ func Run() int {
 	}
 
 	// Generate a descriptive session title in the background.
+	// Forks always get a new title even though resumedSession is set.
 	titleDone := make(chan struct{})
-	if resumedSession == nil {
+	if resumedSession == nil || forkParentID != "" {
 		go func() {
 			defer close(titleDone)
 			titleCtx, titleCancel := context.WithTimeout(context.Background(), 15*time.Second)
