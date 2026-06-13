@@ -19,7 +19,7 @@ internal/
                provider_factory.go   # NewProviderInjector (wraps provider w/ fixed model), newProviderForModel
                uiwriter.go           # UIWriter interface + Debug* payloads + SessionInfoData + RetryData + nullUI
   ui/          ui.go                 # Terminal UIWriter impl: ANSI codes, cursor moves, parallel-tool state, debug renderer, approval prompt
-  export/      export.go             # JSON, HTML (with markdown rendering, foldable tool results, edit diffs), chain-aware export (walks ancestor chain root-first), shared renderMessage for main + subagent
+  export/      export.go             # JSON, HTML (with markdown rendering, foldable tool results, edit diffs), shared renderMessage for main + subagent
   session/     session.go            # Session, sessionHeader (twin kept — append perf), TitleFromFirstMessage, LastMessageTime
                writer.go             # Writer, NewWriter, WriterForExisting, Save, fullRewrite, appendNew, ErrConflict (mtime guard)
                reader.go             # readFile (tolerates truncated trailing line), parseFiles (parallel), uuidFromFilename
