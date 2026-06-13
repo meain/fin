@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,7 @@ func Run() int {
 	promptFile := flag.String("f", "", "read prompt from file (for shebang scripts)")
 	toolsFlag := flag.String("tools", "", "tools to enable: all, none, or comma-separated list (e.g. read,shell)")
 	temp := flag.Bool("temp", false, "mark session as temporary (skipped by -c, -sessions shows [temp])")
+	fork := flag.Bool("fork", false, "fork the current (or -s/-n) session into a new one and continue")
 	flag.Parse()
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -121,9 +123,9 @@ func Run() int {
 		}
 		switch *exportFlag {
 		case "json":
-			export.JSON(sess, os.Stdout)
+			export.JSON(session.LoadChain(sess), os.Stdout)
 		case "html":
-			export.HTML(sess, os.Stdout)
+			export.HTML(session.LoadChain(sess), os.Stdout)
 		case "message":
 			for i := len(sess.Messages) - 1; i >= 0; i-- {
 				if sess.Messages[i].Role == t.RoleAssistant && sess.Messages[i].Content != "" {
@@ -183,13 +185,14 @@ func Run() int {
 
 	// Resolve session first so we can inherit the model if needed.
 	var resumedSession *session.Session
+	var forkParentID string // set when -fork is used
 	var sw *session.Writer
 	if *name != "" {
 		sess, err := session.LoadByName(*name)
 		if err == nil {
 			resumedSession = sess
 		}
-	} else if *cont || *sessionFlag != "" {
+	} else if *cont || *sessionFlag != "" || *fork {
 		sess, err := loadSession()
 		if err != nil {
 			u := ui.New(nil, outMode, piped)
@@ -197,7 +200,13 @@ func Run() int {
 			u.Close()
 			return 1
 		}
-		resumedSession = sess
+		if *fork {
+			// Fork: copy messages from origin but start a fresh session.
+			forkParentID = sess.ID
+			resumedSession = sess
+		} else {
+			resumedSession = sess
+		}
 	} else if *match && pipedInput == "" && len(args) > 0 {
 		query := strings.Join(args, " ")
 		resumedSession = promptSessionMatch(query, cfg.Settings.Matching)
@@ -228,7 +237,7 @@ func Run() int {
 
 	// Determine session ID early so it can be included in the system prompt.
 	sessionID := ""
-	if resumedSession != nil {
+	if resumedSession != nil && forkParentID == "" {
 		sessionID = resumedSession.ID
 	} else {
 		sessionID = uuid.New().String()
@@ -238,7 +247,7 @@ func Run() int {
 	defer u.Close()
 	ag := agent.New(agent.NewProviderInjector(p, modelName), fullModel, cfg, app, u, skills, sessionID, enabledTools)
 
-	if resumedSession != nil {
+	if resumedSession != nil && forkParentID == "" {
 		ag.SetMessages(resumedSession.Messages)
 		sw = session.WriterForExisting(resumedSession)
 		label := resumedSession.ID
@@ -246,6 +255,13 @@ func Run() int {
 			label = resumedSession.Name
 		}
 		u.SessionInfo(agent.SessionInfoData{Resumed: true, Label: label, StartedAt: resumedSession.StartedAt})
+	}
+	if forkParentID != "" {
+		// Fork: new session with parent link, messages copied from origin.
+		sw = session.NewWriter(sessionID, fullModel, "", *temp)
+		sw.SetPreviousSession(forkParentID)
+		ag.SetMessages(resumedSession.Messages)
+		u.SessionInfo(agent.SessionInfoData{Label: sessionID[:8] + " (fork of " + forkParentID[:8] + ")"})
 	}
 	if sw == nil {
 		if *name != "" {
@@ -367,8 +383,8 @@ func Run() int {
 }
 
 // printSessions renders the session list. Outputs JSON when stdout is not a
-// terminal; otherwise renders a colored, fixed-width table. Pure data lives
-// in session.LoadSummaries; this is the terminal-flavored consumer.
+// terminal; otherwise renders a colored, fixed-width table with forks grouped
+// under their parents. Pure data lives in session.LoadSummaries.
 func printSessions(limit int, since time.Time) {
 	sessions, total, err := session.LoadSummaries(limit, since)
 	if err != nil || len(sessions) == 0 {
@@ -382,12 +398,55 @@ func printSessions(limit int, since time.Time) {
 		return
 	}
 
+	// Build id -> session map, then load any parent sessions not in the list.
+	byID := map[string]*session.Session{}
+	for i := range sessions {
+		byID[sessions[i].ID] = &sessions[i]
+	}
+	for _, sess := range sessions {
+		cur := sess
+		for cur.PreviousSession != "" {
+			if _, ok := byID[cur.PreviousSession]; ok {
+				break
+			}
+			parent, err := session.LoadByID(cur.PreviousSession)
+			if err != nil {
+				break
+			}
+			byID[parent.ID] = parent
+			cur = *parent
+		}
+	}
+
+	// Build children map and find roots.
+	children := map[string][]*session.Session{}
+	var roots []*session.Session
+	for _, sess := range byID {
+		if sess.PreviousSession == "" {
+			roots = append(roots, sess)
+		} else if _, ok := byID[sess.PreviousSession]; ok {
+			children[sess.PreviousSession] = append(children[sess.PreviousSession], sess)
+		} else {
+			roots = append(roots, sess)
+		}
+	}
+
+	// Sort roots and children by most recent activity.
+	sort.Slice(roots, func(i, j int) bool {
+		return session.LastMessageTime(*roots[i]).After(session.LastMessageTime(*roots[j]))
+	})
+	for k := range children {
+		sort.Slice(children[k], func(i, j int) bool {
+			return session.LastMessageTime(*children[k][i]).After(session.LastMessageTime(*children[k][j]))
+		})
+	}
+
 	termWidth, _, _ := term.GetSize(int(os.Stdout.Fd()))
 	if termWidth <= 0 {
 		termWidth = 80
 	}
 
-	for idx, sess := range sessions {
+	sessionTitle := func(sess *session.Session) string {
 		title := sess.Title
 		if title == "" {
 			for _, m := range sess.Messages {
@@ -397,7 +456,13 @@ func printSessions(limit int, since time.Time) {
 				}
 			}
 		}
-		title = strings.ReplaceAll(title, "\n", " ")
+		return strings.ReplaceAll(title, "\n", " ")
+	}
+
+	idx := 1
+	var printSession func(sess *session.Session, depth int)
+	printSession = func(sess *session.Session, depth int) {
+		title := sessionTitle(sess)
 
 		msgCount := 0
 		for _, m := range sess.Messages {
@@ -406,7 +471,7 @@ func printSessions(limit int, since time.Time) {
 			}
 		}
 
-		age := render.RelativeTime(session.LastMessageTime(sess))
+		age := render.RelativeTime(session.LastMessageTime(*sess))
 		short := sess.ID[:8]
 		if sess.Name != "" {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
@@ -415,9 +480,22 @@ func printSessions(limit int, since time.Time) {
 			short = short + render.Dim + " [temp]" + render.Reset
 		}
 
-		counter := fmt.Sprintf("%d.", idx+1)
 		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)
-		maxTitle := termWidth - len(counter) - len(short) - len(meta) - 3
+		indent := strings.Repeat("  ", depth)
+		if depth > 0 {
+			indent = strings.Repeat("  ", depth-1) + "↳ "
+		}
+
+		var counter string
+		if depth == 0 {
+			counter = fmt.Sprintf("%d.", idx)
+			idx++
+		} else {
+			counter = strings.Repeat(" ", len(fmt.Sprintf("%d.", idx-1)))
+		}
+
+		overhead := len(counter) + len(indent) + len(short) + len(meta) + 3
+		maxTitle := termWidth - overhead
 		if maxTitle < 10 {
 			maxTitle = 10
 		}
@@ -426,7 +504,18 @@ func printSessions(limit int, since time.Time) {
 			title = string(titleRunes[:maxTitle-1]) + "…"
 		}
 
-		fmt.Printf("%s%s%s %s %s %s%s%s\n", render.Dim, counter, render.Reset, short, title, render.Dim, meta, render.Reset)
+		fmt.Printf("%s%s%s %s%s %s %s%s%s\n",
+			render.Dim, counter, render.Reset,
+			indent, short, title,
+			render.Dim, meta, render.Reset)
+
+		for _, child := range children[sess.ID] {
+			printSession(child, depth+1)
+		}
+	}
+
+	for _, root := range roots {
+		printSession(root, 0)
 	}
 
 	if limit > 0 && total > limit {

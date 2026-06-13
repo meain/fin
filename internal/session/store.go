@@ -155,6 +155,7 @@ type Summary struct {
 	Model        string    `json:"model"`
 	Name         string    `json:"name,omitempty"`
 	Temp         bool      `json:"temp,omitempty"`
+	ParentID     string    `json:"parent_id,omitempty"`
 	StartedAt    time.Time `json:"started_at"`
 	MessageCount int       `json:"message_count"`
 	LastActivity time.Time `json:"last_activity"`
@@ -177,12 +178,32 @@ func SummariesJSON(sessions []Session) ([]byte, error) {
 			Model:        sess.Model,
 			Name:         sess.Name,
 			Temp:         sess.Temp,
+			ParentID:     sess.PreviousSession,
 			StartedAt:    sess.StartedAt,
 			MessageCount: msgCount,
 			LastActivity: LastMessageTime(sess),
 		}
 	}
 	return json.MarshalIndent(summaries, "", "  ")
+}
+
+// LoadChain walks up the previous_session chain from sess to the root,
+// returning [root, ..., sess] ordered oldest-first. Each hop is a direct
+// file read by ID — no directory scan. Capped at 50 hops.
+func LoadChain(sess *Session) []*Session {
+	chain := []*Session{sess}
+	for i := 0; i < 50; i++ {
+		cur := chain[0]
+		if cur.PreviousSession == "" {
+			break
+		}
+		parent, err := LoadByID(cur.PreviousSession)
+		if err != nil {
+			break
+		}
+		chain = append([]*Session{parent}, chain...)
+	}
+	return chain
 }
 
 // ParseSince parses a human duration string ("2d", "1w", "3h", "30m") into

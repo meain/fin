@@ -38,6 +38,8 @@ fin -f script.fin                      # read prompt from file (strips shebang l
 fin -f script.fin "extra args"         # file prompt + positional args appended
 fin -tools read,shell "prompt"         # restrict tool set (also: all, none)
 fin -temp "quick question"             # mark session as temporary (skipped by -c, shown as [temp] in listings)
+fin -fork "try different approach"     # fork the last session into a new one and continue from there
+fin -s <uuid> -fork "try differently"  # fork a specific session
 ```
 
 ## Shebang scripts
@@ -89,6 +91,7 @@ Progressive disclosure: only skill names and descriptions are loaded at startup.
 - mtime conflict detection: refuses to overwrite if another `fin` process modified the file since load, to avoid clobbering concurrent runs.
 - Reader tolerates a truncated trailing line (crash mid-append) so earlier messages stay readable.
 - UUID-based with prefix matching (`fin -s abc12` works). Named sessions via `-n`. Match recent sessions to the current prompt with `-match`.
+- Fork sessions with `-fork`: copies all messages into a new session with `previous_session` pointing to the origin. Forks are shown grouped under their parent in `fin -sessions` (TTY) and as a flat array with `parent_id` in JSON. Exports walk the full ancestor chain root-first.
 
 ### Export
 - **JSON** — full session with all messages and metadata

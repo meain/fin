@@ -120,6 +120,8 @@ fin -f script.fin "extra args"  # file prompt + positional args appended
 fin -tools read,shell "prompt"  # restrict tool set (all, none, or comma list)
 fin -color auto|always|never    # color output
 fin -config <path>              # override config file path
+fin -fork "prompt"              # fork the last session into a new one, continue with prompt
+fin -s <uuid> -fork "prompt"    # fork a specific session
 ```
 
 ## Config
