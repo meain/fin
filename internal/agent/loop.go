@@ -197,7 +197,12 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 		case item.err != nil:
 			msg.Content = errorWithContext(item.tool, item.tc.Name, item.args, item.err)
 		case r.err != nil:
-			msg.Content = errorWithContext(item.tool, item.tc.Name, item.args, r.err)
+			errMsg := errorWithContext(item.tool, item.tc.Name, item.args, r.err)
+			if r.result.Content != "" {
+				msg.Content = r.result.Content + "\n" + errMsg
+			} else {
+				msg.Content = errMsg
+			}
 		default:
 			msg.Content = a.maybeSpillOutput(item.tc.Name, item.tc.ID, r.result.Content)
 			msg.Images = r.result.Images
