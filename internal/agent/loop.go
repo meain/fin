@@ -212,23 +212,28 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 	}
 }
 
+const defaultMaxOutputBytes = 20000
+
 // maybeSpillOutput checks if content exceeds the configured max_output_bytes
-// for the tool. If so, writes the full output to /tmp/fin/<id>.txt and
-// returns a truncated version with a pointer to the file.
+// for the tool (defaulting to defaultMaxOutputBytes). If so, writes the full
+// output to /tmp/fin/<id>.txt and returns a truncated version with a pointer.
 func (a *Agent) maybeSpillOutput(toolName, callID, content string) string {
-	cfg, ok := a.config.Tools[toolName]
-	if !ok || cfg.MaxOutputBytes <= 0 || len(content) <= cfg.MaxOutputBytes {
+	limit := defaultMaxOutputBytes
+	if cfg, ok := a.config.Tools[toolName]; ok && cfg.MaxOutputBytes > 0 {
+		limit = cfg.MaxOutputBytes
+	}
+	if len(content) <= limit {
 		return content
 	}
 
-	dir := filepath.Join(os.TempDir(), "fin")
+	dir := filepath.Join(os.TempDir(), "fin", a.sessionID)
 	_ = os.MkdirAll(dir, 0755)
 	path := filepath.Join(dir, callID+".txt")
 	_ = os.WriteFile(path, []byte(content), 0644)
 
-	truncated := content[:cfg.MaxOutputBytes]
-	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output written to %s — use the Read tool to view it if needed.]",
-		truncated, cfg.MaxOutputBytes, path)
+	truncated := content[:limit]
+	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output spilled to %s — call the Read tool on that path to get the rest.]",
+		truncated, limit, path)
 }
 
 // errorWithContext formats a tool error with the tool name and primary arg
