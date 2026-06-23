@@ -10,6 +10,7 @@ Opinionated CLI agent harness in Go
 - **Tool execution**: Read/write/edit files, shell commands, images (vision), directory trees, subagents, conversation compaction
 - **Agent skills**: [agentskills.io](https://agentskills.io) spec — progressive disclosure, project and global skills
 - **Session persistence**: Incremental JSONL saves, resume, named sessions (`-n`), prefix-match UUIDs, export as JSON/HTML/message, auto-generated titles via secondary model
+- **FIFO queue**: every session exposes a named pipe so another process can inject follow-up messages; `fin -q` writes to the running session's queue
 - **Session forking**: `-fork` branches a session at its last message — the new fork copies all messages from the parent, gets its own title, `parent_id` in JSON, and grouped display under the parent in `fin -sessions`
 - **Session matching**: `-match` searches recent sessions by keyword relevance (title-weighted + recency-decayed) and offers to continue one
 - **Prompt caching**: Anthropic system prompt and tool definitions cached automatically
@@ -47,6 +48,11 @@ fin -match "fix the auth bug"  # find relevant past session and offer to continu
 # Fork sessions
 fin -fork "try a different approach"       # fork last session into a new one
 fin -s <uuid> -fork "try differently"      # fork a specific session
+
+# Queue messages into a running session
+fin -q do this next                        # send to last running session
+fin -q -s <uuid> do this next             # send to a specific session
+fin -q -n mywork do this next             # send to a named session
 
 # Export sessions
 fin -export json           # export last session as JSON
