@@ -3,15 +3,19 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,6 +59,7 @@ func Run() int {
 	temp := flag.Bool("temp", false, "mark session as temporary (skipped by -c, -sessions shows [temp])")
 	fork := flag.Bool("fork", false, "fork the current (or -s/-n) session into a new one and continue")
 	secondaryModel := flag.String("secondary-model", "", "model for title generation (overrides config)")
+	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
 	flag.Parse()
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -114,6 +119,28 @@ func Run() int {
 			return session.LoadByName(*sessionFlag)
 		}
 		return session.LoadLast()
+	}
+
+	if *queue {
+		msg := strings.Join(flag.Args(), " ")
+		if msg == "" {
+			fmt.Fprintf(os.Stderr, "usage: fin -q \"message\"\n")
+			return 1
+		}
+		sess, err := loadSession()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "queue: %v\n", err)
+			return 1
+		}
+		fifoPath := fifoPathForSession(sess.ID)
+		wf, err := os.OpenFile(fifoPath, os.O_WRONLY, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "queue: no active session (FIFO not found: %s)\n", fifoPath)
+			return 1
+		}
+		defer wf.Close()
+		fmt.Fprintln(wf, msg)
+		return 0
 	}
 
 	if *exportFlag != "" {
@@ -330,6 +357,17 @@ func Run() int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	// Write session header immediately so -q can find this session by ID.
+	_ = sw.Save(ag.Messages())
+
+	fifoPath := fifoPathForSession(sw.ID())
+	if err := syscall.Mkfifo(fifoPath, 0600); err != nil && !errors.Is(err, syscall.EEXIST) {
+		fmt.Fprintf(os.Stderr, "queue: mkfifo: %v\n", err)
+		return 1
+	}
+	defer os.Remove(fifoPath)
+	queueCh := startFIFOReader(ctx, fifoPath)
+
 	// Compose prompt: file base + positional args + piped stdin
 	prompt := filePrompt
 	if argPrompt := strings.Join(args, " "); argPrompt != "" {
@@ -351,6 +389,26 @@ func Run() int {
 		u.Error(err.Error())
 		u.Close()
 		return 1
+	}
+
+loop:
+	for {
+		select {
+		case msg, ok := <-queueCh:
+			if !ok {
+				break loop
+			}
+			fmt.Fprintf(os.Stderr, "\n[queued] %s\n\n", msg)
+			if err := ag.AddUserMessage(ctx, msg); err != nil {
+				u.Error(err.Error())
+				u.Close()
+				return 1
+			}
+		case <-ctx.Done():
+			break loop
+		default:
+			break loop
+		}
 	}
 
 	// Generate a descriptive session title in the background.
@@ -588,6 +646,43 @@ func promptSessionMatch(query string, mc config.MatchingConfig) *session.Session
 		}
 	}
 	return nil
+}
+
+// fifoPathForSession returns the FIFO path for a session by ID.
+func fifoPathForSession(id string) string {
+	return filepath.Join(os.TempDir(), "fin-"+id+".fifo")
+}
+
+// startFIFOReader opens the FIFO at path and returns a channel that receives
+// one message per line. It holds the FIFO open across multiple external
+// write+close cycles (O_RDWR prevents EOF between writers). The goroutine
+// exits and the channel is closed when ctx is cancelled.
+func startFIFOReader(ctx context.Context, path string) chan string {
+	ch := make(chan string, 64)
+	go func() {
+		defer close(ch)
+		// O_RDWR opens immediately (no blocking) and acts as both the read
+		// end and a keep-alive write reference, preventing EOF between writers.
+		f, err := os.OpenFile(path, os.O_RDWR, 0)
+		if err != nil {
+			return
+		}
+		go func() { <-ctx.Done(); f.Close() }()
+
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			msg := strings.TrimSpace(sc.Text())
+			if msg == "" {
+				continue
+			}
+			select {
+			case ch <- msg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 // parseToolsFlag interprets the -tools flag value.
