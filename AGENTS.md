@@ -123,6 +123,8 @@ fin -config <path>              # override config file path
 fin -fork "prompt"              # fork the last session into a new one, continue with prompt
 fin -s <uuid> -fork "prompt"    # fork a specific session
 fin -secondary-model provider/model "prompt"  # override secondary model (title generation)
+fin -temp "quick question"       # mark session as temporary (skipped by -c, shown as [temp])
+fin -c -temp "follow up"        # continue the last temp session
 fin -q message words here       # queue a message into the last running session's FIFO
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session

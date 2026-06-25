@@ -118,6 +118,9 @@ func Run() int {
 			}
 			return session.LoadByName(*sessionFlag)
 		}
+		if *temp {
+			return session.LoadLastTemp()
+		}
 		return session.LoadLast()
 	}
 

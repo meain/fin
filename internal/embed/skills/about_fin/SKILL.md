@@ -38,6 +38,7 @@ fin -f script.fin                      # read prompt from file (strips shebang l
 fin -f script.fin "extra args"         # file prompt + positional args appended
 fin -tools read,shell "prompt"         # restrict tool set (also: all, none)
 fin -temp "quick question"             # mark session as temporary (skipped by -c, shown as [temp] in listings)
+fin -c -temp "follow up"               # continue the last temp session
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
 ```

@@ -49,6 +49,10 @@ fin -match "fix the auth bug"  # find relevant past session and offer to continu
 fin -fork "try a different approach"       # fork last session into a new one
 fin -s <uuid> -fork "try differently"      # fork a specific session
 
+# Temporary sessions (skipped by -c, shown as [temp] in listings)
+fin -temp "quick scratch question"         # start a temp session
+fin -c -temp "follow up"                   # continue the last temp session
+
 # Queue messages into a running session
 fin -q do this next                        # send to last running session
 fin -q -s <uuid> do this next             # send to a specific session

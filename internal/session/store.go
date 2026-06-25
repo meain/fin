@@ -117,6 +117,20 @@ func LoadLast() (*Session, error) {
 	return readFile(es[0].path)
 }
 
+// LoadLastTemp loads the most recently modified temporary session.
+func LoadLastTemp() (*Session, error) {
+	all, err := entries()
+	if err != nil {
+		return nil, fmt.Errorf("no sessions found")
+	}
+	for _, e := range all {
+		if e.temp {
+			return readFile(e.path)
+		}
+	}
+	return nil, fmt.Errorf("no temp sessions found")
+}
+
 // LoadSummaries returns up to limit recent sessions (limit<=0 means no
 // limit), optionally filtered by since. Returns the parsed sessions plus
 // the total number of candidates that passed the since filter so callers
