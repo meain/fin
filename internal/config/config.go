@@ -54,7 +54,7 @@ type ToolConfig struct {
 	Approval       string   `toml:"approval"`         // "auto", "confirm", "deny"
 	Allow          []string `toml:"allow"`             // glob patterns (shell tool)
 	Deny           []string `toml:"deny"`              // glob patterns (shell tool)
-	MaxOutputBytes int      `toml:"max_output_bytes"`  // 0 = use default (20000 bytes)
+	MaxOutputBytes int      `toml:"max_output_bytes"`  // 0 = use default (40000 bytes)
 }
 
 // Default returns the built-in defaults used when no config file exists.

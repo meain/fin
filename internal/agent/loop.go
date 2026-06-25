@@ -212,7 +212,7 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 	}
 }
 
-const defaultMaxOutputBytes = 20000
+const defaultMaxOutputBytes = 40000
 
 // maybeSpillOutput checks if content exceeds the configured max_output_bytes
 // for the tool (defaulting to defaultMaxOutputBytes). If so, writes the full
@@ -232,7 +232,7 @@ func (a *Agent) maybeSpillOutput(toolName, callID, content string) string {
 	_ = os.WriteFile(path, []byte(content), 0644)
 
 	truncated := content[:limit]
-	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output spilled to %s — call the Read tool on that path to get the rest.]",
+	return fmt.Sprintf("%s\n\n[Output truncated at %d bytes. Full output spilled to %s — use the Read tool with offset and limit parameters to read it in chunks (e.g. limit=500) to avoid hitting the same output limit again.]",
 		truncated, limit, path)
 }
 
