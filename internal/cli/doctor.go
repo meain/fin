@@ -126,7 +126,7 @@ func printDoctor(cfg *config.Config) {
 		default:
 			approvalColor = dim(padded)
 		}
-		row(tl.Name(), approvalColor+dim(shortDesc(tl.Description(), 70)))
+		row(tl.Name(), approvalColor+shortDesc(tl.Description(), 70))
 	}
 	fmt.Println()
 
@@ -134,7 +134,7 @@ func printDoctor(cfg *config.Config) {
 	builtins := agent.BuiltinSkillEntries()
 	header(fmt.Sprintf("Builtin Skills (%d)", len(builtins)))
 	for _, s := range builtins {
-		row(s.Name, dim(shortDesc(s.Description, 80)))
+		row(s.Name, shortDesc(s.Description, 80))
 	}
 	fmt.Println()
 
