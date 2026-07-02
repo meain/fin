@@ -24,7 +24,7 @@ type Settings struct {
 	ProjectFile string          `toml:"project_file"`
 	MaxTurns    int             `toml:"max_turns"`
 	Approve     string          `toml:"approve"` // "all", "safe", "none"
-	UI          string          `toml:"ui"`      // "default", "quiet"
+	UI          string          `toml:"ui"`      // "default", "minimal", "quiet", "debug"
 	Matching    MatchingConfig  `toml:"matching"`
 }
 

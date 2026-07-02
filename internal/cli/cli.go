@@ -50,7 +50,7 @@ func Run() int {
 	exportFlag := flag.String("export", "", "export format: json, html, message")
 	approve := flag.String("approve", "", "tool approval mode: all, safe, none")
 	yolo := flag.Bool("yolo", false, "alias for -approve all")
-	uiMode := flag.String("ui", "", "output mode: default, quiet")
+	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet, debug")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")

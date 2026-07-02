@@ -25,7 +25,8 @@ var stdout = os.Stdout
 type OutputMode int
 
 const (
-	OutputDefault OutputMode = iota // tool names + streamed text + tool detail
+	OutputDefault OutputMode = iota // tool names + streamed text + tool detail (new default)
+	OutputMinimal                   // same as old default: tool names + streamed text + tool detail
 	OutputDebug                     // default + token usage
 	OutputQuiet                     // only final response text (stdout)
 	OutputSilent                    // no output at all (for subagents)
@@ -35,6 +36,8 @@ const (
 // values fall back to OutputDefault.
 func ParseOutputMode(s string) OutputMode {
 	switch s {
+	case "minimal":
+		return OutputMinimal
 	case "quiet":
 		return OutputQuiet
 	case "debug":
@@ -59,7 +62,7 @@ const (
 	uiError
 	uiSessionInfo // session resumed/created (shown in default + debug)
 	uiRetry       // retry attempt (shown in default + debug)
-	uiDebug // only shown in debug mode
+	uiDebug       // only shown in debug mode
 )
 
 // UIEvent is a message sent to the UI goroutine. Structured payload types
@@ -300,7 +303,7 @@ func (u *UI) handleEvent(ev UIEvent) {
 		u.handleToolApproval(ev)
 
 	case uiInfo:
-		if u.piped || (u.mode != OutputDefault && u.mode != OutputDebug) {
+		if u.piped || (u.mode != OutputDefault && u.mode != OutputMinimal && u.mode != OutputDebug) {
 			return
 		}
 		u.write(fmt.Sprintf("%s%s%s\n", render.Dim, ev.Text, render.Reset))
