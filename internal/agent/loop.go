@@ -143,8 +143,8 @@ func (a *Agent) runToolsParallel(ctx context.Context, items []approvedTool) []to
 		go func(i int, tl tool.Tool, name string, args map[string]any) {
 			defer wg.Done()
 			if _, ok := tl.(*tool.ShellTool); ok {
-				tl = &tool.ShellTool{OnOutput: func(lines int) {
-					a.ui.ToolOutput(i, lines)
+				tl = &tool.ShellTool{OnOutput: func(line string, total int) {
+					a.ui.ToolOutput(i, line, total)
 				}}
 			}
 			res, err := tl.Run(ctx, args)

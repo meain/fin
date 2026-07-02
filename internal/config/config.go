@@ -21,19 +21,19 @@ type Config struct {
 
 // Settings holds non-model knobs.
 type Settings struct {
-	ProjectFile string          `toml:"project_file"`
-	MaxTurns    int             `toml:"max_turns"`
-	Approve     string          `toml:"approve"` // "all", "safe", "none"
-	UI          string          `toml:"ui"`      // "default", "minimal", "quiet", "debug"
-	Matching    MatchingConfig  `toml:"matching"`
+	ProjectFile string         `toml:"project_file"`
+	MaxTurns    int            `toml:"max_turns"`
+	Approve     string         `toml:"approve"` // "all", "safe", "none"
+	UI          string         `toml:"ui"`      // "default", "minimal", "quiet", "debug"
+	Matching    MatchingConfig `toml:"matching"`
 }
 
 // MatchingConfig holds tuning constants for session matching.
 type MatchingConfig struct {
-	TitleWeight     float64 `toml:"title_weight"`     // weight applied to title hits (default 3)
-	ContentCap      int     `toml:"content_cap"`      // cap on content hits per keyword (default 5)
-	RecencyDecayDay int     `toml:"recency_decay_d"`  // decay window in days (default 7)
-	RecencyBonus    float64 `toml:"recency_bonus"`    // max recency multiplier (default 0.5)
+	TitleWeight     float64 `toml:"title_weight"`    // weight applied to title hits (default 3)
+	ContentCap      int     `toml:"content_cap"`     // cap on content hits per keyword (default 5)
+	RecencyDecayDay int     `toml:"recency_decay_d"` // decay window in days (default 7)
+	RecencyBonus    float64 `toml:"recency_bonus"`   // max recency multiplier (default 0.5)
 }
 
 // ModelsConfig holds the conversation and secondary model identifiers.
@@ -52,9 +52,9 @@ type ProviderConfig struct {
 // ToolConfig configures a single tool's approval policy and shell allow/deny lists.
 type ToolConfig struct {
 	Approval       string   `toml:"approval"`         // "auto", "confirm", "deny"
-	Allow          []string `toml:"allow"`             // glob patterns (shell tool)
-	Deny           []string `toml:"deny"`              // glob patterns (shell tool)
-	MaxOutputBytes int      `toml:"max_output_bytes"`  // 0 = use default (40000 bytes)
+	Allow          []string `toml:"allow"`            // glob patterns (shell tool)
+	Deny           []string `toml:"deny"`             // glob patterns (shell tool)
+	MaxOutputBytes int      `toml:"max_output_bytes"` // 0 = use default (40000 bytes)
 }
 
 // Default returns the built-in defaults used when no config file exists.

@@ -16,7 +16,7 @@ type UIWriter interface {
 	ToolCallProgress(name, argsSoFar string)
 	ToolStart(idx, total int, name string, args map[string]any)
 	ToolDone(idx int, name string, args map[string]any, result t.ToolResult, err error)
-	ToolOutput(idx, lines int)
+	ToolOutput(idx int, line string, total int)
 	ToolCallStart(name string, args map[string]any)
 	ToolApprovalPrompt(name string, args map[string]any) bool
 	Info(msg string)
@@ -96,16 +96,16 @@ type RetryData struct {
 // suppress output entirely without depending on the concrete UI package).
 type nullUI struct{}
 
-func (nullUI) StreamText(string)                                                            {}
-func (nullUI) EndStream()                                                                   {}
-func (nullUI) ToolCallProgress(string, string)                                              {}
-func (nullUI) ToolStart(int, int, string, map[string]any)                                   {}
-func (nullUI) ToolDone(int, string, map[string]any, t.ToolResult, error)                    {}
-func (nullUI) ToolOutput(int, int)                                                          {}
-func (nullUI) ToolCallStart(string, map[string]any)                                         {}
-func (nullUI) ToolApprovalPrompt(string, map[string]any) bool                               { return false }
-func (nullUI) Info(string)                                                                  {}
-func (nullUI) Error(string)                                                                 {}
-func (nullUI) SessionInfo(SessionInfoData)                                                  {}
-func (nullUI) Retry(RetryData)                                                              {}
-func (nullUI) Debug(DebugEvent)                                                             {}
+func (nullUI) StreamText(string)                                         {}
+func (nullUI) EndStream()                                                {}
+func (nullUI) ToolCallProgress(string, string)                           {}
+func (nullUI) ToolStart(int, int, string, map[string]any)                {}
+func (nullUI) ToolDone(int, string, map[string]any, t.ToolResult, error) {}
+func (nullUI) ToolOutput(int, string, int)                               {}
+func (nullUI) ToolCallStart(string, map[string]any)                      {}
+func (nullUI) ToolApprovalPrompt(string, map[string]any) bool            { return false }
+func (nullUI) Info(string)                                               {}
+func (nullUI) Error(string)                                              {}
+func (nullUI) SessionInfo(SessionInfoData)                               {}
+func (nullUI) Retry(RetryData)                                           {}
+func (nullUI) Debug(DebugEvent)                                          {}

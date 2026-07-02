@@ -92,6 +92,14 @@ type toolLineState struct {
 	err     error
 	start   time.Time
 	lines   int // streaming line count (updated during execution)
+
+	// outputBuf holds the last few streamed output lines for tools shown
+	// expanded (currently: shell, while running, in OutputDefault mode).
+	outputBuf []string
+
+	// renderedRows is how many terminal rows this tool's block occupied on
+	// the last redraw, used to compute cursor-up distance for the next one.
+	renderedRows int
 }
 
 // UI handles terminal output via a single goroutine that processes events.
@@ -182,9 +190,10 @@ func (u *UI) ToolDone(idx int, name string, args map[string]any, result t.ToolRe
 	u.send(UIEvent{Kind: uiToolDone, Index: idx, Name: name, Args: args, Result: result, Err: err})
 }
 
-// ToolOutput updates a running tool's streaming line count.
-func (u *UI) ToolOutput(idx, lines int) {
-	u.send(UIEvent{Kind: uiToolOutput, Index: idx, Total: lines})
+// ToolOutput updates a running tool's streaming line count and, for tools
+// rendered expanded, appends the new output line to the live scrollback.
+func (u *UI) ToolOutput(idx int, line string, total int) {
+	u.send(UIEvent{Kind: uiToolOutput, Index: idx, Text: line, Total: total})
 }
 
 // ToolCallStart shows a tool being invoked (used for approval display).
@@ -295,8 +304,15 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 	case uiToolOutput:
 		if ev.Index >= 0 && ev.Index < len(u.toolLines) && u.toolLines[ev.Index].running {
-			u.toolLines[ev.Index].lines = ev.Total
-			u.updateToolLine(ev.Index)
+			tl := &u.toolLines[ev.Index]
+			tl.lines = ev.Total
+			if u.isExpandedShell(*tl) {
+				tl.outputBuf = append(tl.outputBuf, ev.Text)
+				if len(tl.outputBuf) > shellScrollbackLines {
+					tl.outputBuf = tl.outputBuf[len(tl.outputBuf)-shellScrollbackLines:]
+				}
+			}
+			u.redrawAllTools()
 		}
 
 	case uiToolApproval:
@@ -408,6 +424,10 @@ func (u *UI) handleToolProgress(name, argsSoFar string) {
 
 // --- Parallel tool status lines ---
 
+// shellScrollbackLines is how many trailing output lines are kept visible
+// while a shell command's expanded view is streaming.
+const shellScrollbackLines = 6
+
 func (u *UI) handleToolStart(ev UIEvent) {
 	if u.mode == OutputQuiet || u.piped {
 		return
@@ -438,13 +458,7 @@ func (u *UI) handleToolStart(ev UIEvent) {
 		start:   time.Now(),
 	}
 
-	// Print the initial status line.
-	suffix := fmt.Sprintf(" %s…%s", render.Dim, render.Reset)
-	suffixVis := render.VisibleLen(suffix)
-	maxLabel := getTermWidth() - suffixVis
-	label := render.Truncate(toolLabel(ev.Name, ev.Args), maxLabel)
-	line := fmt.Sprintf("%s%s%s%s", render.Bold, render.Yellow, label, render.Reset+suffix)
-	u.write(line + "\n")
+	u.redrawAllTools()
 }
 
 func (u *UI) handleToolDone(ev UIEvent) {
@@ -461,8 +475,9 @@ func (u *UI) handleToolDone(ev UIEvent) {
 	tl.result = ev.Result
 	tl.err = ev.Err
 
-	// Update the line in-place.
-	u.updateToolLine(ev.Index)
+	// Redraw: expanded (shell) blocks collapse to a single summary line the
+	// moment running flips false, since blockLines only expands while running.
+	u.redrawAllTools()
 
 	// If all tools are done, clear the batch state.
 	if !u.hasRunningTools() {
@@ -470,34 +485,46 @@ func (u *UI) handleToolDone(ev UIEvent) {
 	}
 }
 
-func (u *UI) updateToolLine(idx int) {
-	if idx < 0 || idx >= len(u.toolLines) {
-		return
-	}
+// isExpandedShell reports whether tl should render as a live multi-line
+// block (full command header + streaming scrollback) instead of a single
+// collapsed status line. Only shell commands, only while running, only in
+// the default output mode.
+func (u *UI) isExpandedShell(tl toolLineState) bool {
+	return u.mode == OutputDefault && tl.name == "shell" && tl.running
+}
 
-	// Calculate distance from cursor (cursor is after the last tool line).
-	linesUp := len(u.toolLines) - idx
-	if linesUp > 0 {
-		fmt.Fprintf(stdout, "\033[%dA", linesUp)
+// blockLines returns the terminal lines to render for one tool's current
+// state: a multi-line expanded block for a running shell command, or a
+// single collapsed status line otherwise.
+func (u *UI) blockLines(tl toolLineState) []string {
+	if u.isExpandedShell(tl) {
+		cmd, _ := tl.args["command"].(string)
+		cmd = strings.ReplaceAll(cmd, "\n", `\n`)
+		lines := make([]string, 0, 1+len(tl.outputBuf))
+		lines = append(lines, fmt.Sprintf("%s%s$ %s%s", render.Bold, render.Yellow, cmd, render.Reset))
+		for _, o := range tl.outputBuf {
+			lines = append(lines, fmt.Sprintf("  %s%s%s", render.Dim, o, render.Reset))
+		}
+		return lines
 	}
-	fmt.Fprint(stdout, "\033[2K\r")
+	return []string{u.collapsedLine(tl)}
+}
 
-	tl := u.toolLines[idx]
-	elapsed := time.Since(tl.start)
+// collapsedLine renders a tool's single-line summary: "…" placeholder
+// details while running, or elapsed time / line count / error once resolved.
+func (u *UI) collapsedLine(tl toolLineState) string {
 	label := toolLabel(tl.name, tl.args)
+	elapsedStr := render.FormatElapsed(time.Since(tl.start))
 
-	elapsedStr := render.FormatElapsed(elapsed)
 	resultInfo := ""
 	if tl.running && tl.lines > 0 {
 		resultInfo = fmt.Sprintf("(%d lines) ", tl.lines)
 	} else if !tl.running && tl.err == nil {
-		lines := strings.Count(tl.result.Content, "\n")
-		if lines > 0 {
+		if lines := strings.Count(tl.result.Content, "\n"); lines > 0 {
 			resultInfo = fmt.Sprintf("(%d lines) ", lines)
 		}
 	}
 
-	// Build suffix (always shown) and determine space for label
 	var suffix string
 	labelColor := render.Yellow
 	if tl.err != nil {
@@ -507,24 +534,64 @@ func (u *UI) updateToolLine(idx int) {
 		suffix = fmt.Sprintf(" %s%s%s%s", render.Dim, resultInfo, elapsedStr, render.Reset)
 	}
 
-	// Truncate label to fit: width - suffix_visible - 1 (space after label)
 	suffixVisible := render.VisibleLen(suffix)
 	maxLabel := getTermWidth() - suffixVisible - 1
 	label = render.Truncate(label, maxLabel)
 
-	fmt.Fprintf(stdout, "%s%s%s%s", render.Bold, labelColor, label, render.Reset+suffix)
+	return fmt.Sprintf("%s%s%s%s%s", render.Bold, labelColor, label, render.Reset, suffix)
+}
 
-	if linesUp > 0 {
-		fmt.Fprintf(stdout, "\033[%dB\r", linesUp)
+// rowsFor returns how many terminal rows a rendered line occupies once the
+// terminal wraps it, so cursor-movement math stays correct for long lines.
+func rowsFor(s string) int {
+	w := getTermWidth()
+	if w <= 0 {
+		w = 80
+	}
+	vl := render.VisibleLen(s)
+	if vl == 0 {
+		return 1
+	}
+	return (vl + w - 1) / w
+}
+
+// redrawAllTools redraws every announced tool's block in the current batch.
+// It moves the cursor up by the total rows rendered last time, clears to
+// end of screen, then reprints each tool's current block, recording the new
+// row counts for next time. Tools that haven't started yet (zero value,
+// empty name) are skipped since nothing was ever printed for them.
+func (u *UI) redrawAllTools() {
+	if len(u.toolLines) == 0 {
+		return
+	}
+
+	up := 0
+	for i := range u.toolLines {
+		up += u.toolLines[i].renderedRows
+	}
+	if up > 0 {
+		fmt.Fprintf(stdout, "\033[%dA", up)
+	}
+	fmt.Fprint(stdout, "\r\033[0J")
+
+	for i := range u.toolLines {
+		tl := &u.toolLines[i]
+		if tl.name == "" {
+			break
+		}
+		rows := 0
+		for _, l := range u.blockLines(*tl) {
+			fmt.Fprintln(stdout, l)
+			rows += rowsFor(l)
+		}
+		tl.renderedRows = rows
 	}
 	stdout.Sync()
 }
 
 func (u *UI) refreshToolLines() {
-	for i, tl := range u.toolLines {
-		if tl.running {
-			u.updateToolLine(i)
-		}
+	if u.hasRunningTools() {
+		u.redrawAllTools()
 	}
 }
 

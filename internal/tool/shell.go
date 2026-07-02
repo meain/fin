@@ -19,9 +19,10 @@ const defaultShellTimeout = 30 // seconds
 
 // ShellTool executes shell commands.
 type ShellTool struct {
-	// OnOutput is called with the current line count as output streams in.
-	// Set by the agent to update the UI during execution.
-	OnOutput func(lines int)
+	// OnOutput is called with each new stdout line and the current total
+	// line count as output streams in. Set by the agent to update the UI
+	// during execution.
+	OnOutput func(line string, total int)
 }
 
 func (st *ShellTool) Name() string { return "shell" }
@@ -108,9 +109,10 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 			stdout.WriteByte('\n')
 			lineCount++
 			lc := lineCount
+			line := scanner.Text()
 			mu.Unlock()
 			if st.OnOutput != nil {
-				st.OnOutput(lc)
+				st.OnOutput(line, lc)
 			}
 		}
 	}()
