@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
@@ -72,7 +73,15 @@ func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return t.ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
+		if os.IsNotExist(err) {
+			if resolved, ok := resolveByWhitespaceVariant(path); ok {
+				path = resolved
+				info, err = os.Stat(path)
+			}
+		}
+		if err != nil {
+			return t.ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
+		}
 	}
 
 	if info.IsDir() {
@@ -88,6 +97,53 @@ func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 
 	content, err := readFile(path, args)
 	return t.ToolResult{Content: content}, err
+}
+
+// normalizeSpaces collapses any Unicode space character (regular space,
+// non-breaking space, narrow no-break space, etc.) to a plain ASCII space.
+// macOS screenshot filenames commonly use U+202F before AM/PM, which agents
+// (and users typing paths) frequently substitute with a regular space,
+// causing an otherwise-correct path to fail os.Stat.
+func normalizeSpaces(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			b.WriteRune(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// resolveByWhitespaceVariant looks for a sibling file whose name matches path's
+// basename once all whitespace characters are normalized to plain spaces. It
+// returns the on-disk path if exactly one such match is found.
+func resolveByWhitespaceVariant(path string) (string, bool) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	if !strings.ContainsFunc(base, unicode.IsSpace) {
+		return "", false
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+
+	wantNorm := normalizeSpaces(base)
+	var match string
+	matches := 0
+	for _, e := range entries {
+		if normalizeSpaces(e.Name()) == wantNorm {
+			match = e.Name()
+			matches++
+		}
+	}
+	if matches != 1 {
+		return "", false
+	}
+	return filepath.Join(dir, match), true
 }
 
 func readImage(path, mediaType string) (t.ToolResult, error) {
