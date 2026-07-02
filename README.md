@@ -19,6 +19,7 @@ Opinionated CLI agent harness in Go
 - **Shebang scripts**: `#!/usr/bin/env -S fin -f` — make prompt files executable
 - **Output modes**: `default` (ANSI, streaming, parallel tool UI), `debug` (adds turn timings, token usage), `quiet` (stdout only for scripting)
 - **Tool selection**: `-tools` restricts the active tool set (`all`, `none`, or `read,shell,...`)
+- **Diagnostics**: `fin -doctor` prints a full diagnostic summary — models, providers (with key status), tools, builtin and discovered skills, AGENTS.md files, and session storage
 - **Configurable approval**: Per-tool auto/confirm/deny, glob patterns for shell commands
 - **Tool output spill**: Large tool outputs are written to `/tmp/fin/<id>.txt` with a truncated result pointing to the file — configurable via `max_output_bytes` per tool
 - **Retry with backoff**: Automatic retry on rate limits and server errors
@@ -84,6 +85,9 @@ fin -tools read,shell "list go files"   # only enable read and shell
 fin -tools none "what can you do"       # no tools, just chat
 fin -approve safe "fix the bug"         # auto-approve safe tools, prompt for destructive ones
 fin --max-turns 3 "quick summary"       # cap agent loop iterations
+
+# Diagnostics
+fin -doctor                             # show models, providers, tools, skills, AGENTS.md files
 
 # Piped input
 git diff | fin "review this diff"

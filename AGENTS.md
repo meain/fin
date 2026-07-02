@@ -10,6 +10,7 @@ Opinionated CLI agent harness in Go. Minimal dependencies, raw HTTP to LLM provi
 main.go                              # os.Exit(cli.Run())
 internal/
   cli/         cli.go                # flag parsing, session glue, the user-turn driver, -sessions/-export/-match dispatch
+               doctor.go             # -doctor: print diagnostic summary of tools, models, skills, AGENTS.md, providers
   agent/       agent.go              # Agent type, New(), AddUserMessage, Messages, SetMessages
                loop.go               # run(), runTurn, approveAll, runToolsParallel, detectCompactSummary, appendToolResults, consumeStream, approveTool
                retry.go              # streamWithRetry, retryDelay (exponential backoff + jitter on 429/5xx)
@@ -128,6 +129,7 @@ fin -c -temp "follow up"        # continue the last temp session
 fin -q message words here       # queue a message into the last running session's FIFO
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session
+fin -doctor                     # print diagnostic summary: tools, models, skills, AGENTS.md files, providers, sessions
 ```
 
 ## Config

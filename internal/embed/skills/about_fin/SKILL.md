@@ -41,6 +41,7 @@ fin -temp "quick question"             # mark session as temporary (skipped by -
 fin -c -temp "follow up"               # continue the last temp session
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
+fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
 ```
 
 ## Shebang scripts
