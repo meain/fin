@@ -306,10 +306,10 @@ func (u *UI) handleEvent(ev UIEvent) {
 		if ev.Index >= 0 && ev.Index < len(u.toolLines) && u.toolLines[ev.Index].running {
 			tl := &u.toolLines[ev.Index]
 			tl.lines = ev.Total
-			if u.isExpandedShell(*tl) {
+			if u.isExpanded(*tl) {
 				tl.outputBuf = append(tl.outputBuf, ev.Text)
-				if len(tl.outputBuf) > shellScrollbackLines {
-					tl.outputBuf = tl.outputBuf[len(tl.outputBuf)-shellScrollbackLines:]
+				if len(tl.outputBuf) > scrollbackLines {
+					tl.outputBuf = tl.outputBuf[len(tl.outputBuf)-scrollbackLines:]
 				}
 			}
 			u.redrawAllTools()
@@ -424,9 +424,10 @@ func (u *UI) handleToolProgress(name, argsSoFar string) {
 
 // --- Parallel tool status lines ---
 
-// shellScrollbackLines is how many trailing output lines are kept visible
-// while a shell command's expanded view is streaming.
-const shellScrollbackLines = 6
+// scrollbackLines is how many trailing output lines are kept visible while
+// a tool's expanded view is streaming (only tools that stream output, e.g.
+// shell, ever populate this).
+const scrollbackLines = 6
 
 func (u *UI) handleToolStart(ev UIEvent) {
 	if u.mode == OutputQuiet || u.piped {
@@ -485,23 +486,22 @@ func (u *UI) handleToolDone(ev UIEvent) {
 	}
 }
 
-// isExpandedShell reports whether tl should render as a live multi-line
-// block (full command header + streaming scrollback) instead of a single
-// collapsed status line. Only shell commands, only while running, only in
-// the default output mode.
-func (u *UI) isExpandedShell(tl toolLineState) bool {
-	return u.mode == OutputDefault && tl.name == "shell" && tl.running
+// isExpanded reports whether tl should render as a live multi-line block
+// (full label header + any streaming scrollback) instead of a single
+// collapsed status line. Every tool renders this way while running, in the
+// default output mode — not just ones that stream output.
+func (u *UI) isExpanded(tl toolLineState) bool {
+	return u.mode == OutputDefault && tl.running
 }
 
 // blockLines returns the terminal lines to render for one tool's current
-// state: a multi-line expanded block for a running shell command, or a
-// single collapsed status line otherwise.
+// state: a multi-line expanded block (full, untruncated label plus any
+// streamed output) while running, or a single collapsed status line once
+// it's done. All tools go through the same rendering path.
 func (u *UI) blockLines(tl toolLineState) []string {
-	if u.isExpandedShell(tl) {
-		cmd, _ := tl.args["command"].(string)
-		cmd = strings.ReplaceAll(cmd, "\n", `\n`)
+	if u.isExpanded(tl) {
 		lines := make([]string, 0, 1+len(tl.outputBuf))
-		lines = append(lines, fmt.Sprintf("%s%s$ %s%s", render.Bold, render.Yellow, cmd, render.Reset))
+		lines = append(lines, fmt.Sprintf("%s%s%s%s", render.Bold, render.Yellow, toolLabel(tl.name, tl.args), render.Reset))
 		for _, o := range tl.outputBuf {
 			lines = append(lines, fmt.Sprintf("  %s%s%s", render.Dim, o, render.Reset))
 		}
