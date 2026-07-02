@@ -29,6 +29,7 @@ internal/
   skill/       skill.go              # Skill, ParseMD, Discover (walks up cwd, then ~), scanDir
   prompt/      prompt.go             # BuildSystem (gates base prompt by enabled tools)
                project.go            # readAgentsMD, findProjectFile (uses fsutil.WalkUpFromCwd)
+               claude_memory.go      # ClaudeMemoryDir/Path, readClaudeMemory (picks up Claude Code's auto-memory MEMORY.md)
   config/      config.go             # Config + sub-structs, Default, Load, validate, applyMatchingDefaults
                resolve.go            # ResolveModel (alias chain + provider/model split)
                paths.go              # HomeDir, ConfigPath, SessionPath, AgentsDir/File, SkillFile, SkillsDirName
@@ -137,7 +138,7 @@ fin -doctor                     # print diagnostic summary: tools, models, skill
 TOML at `~/.config/fin/config.toml`:
 
 - `[models]` — `primary` (main conversation model), `secondary` (title generation and any secondary tasks)
-- `[settings]` — `project_file`, `max_turns`, `approve`, `ui`
+- `[settings]` — `project_file`, `max_turns`, `approve`, `ui`, `disable_claude_memory`
 - `[settings.matching]` — `title_weight` (default 3), `content_cap` (default 5), `recency_decay_d` (default 7), `recency_bonus` (default 0.5)
 - `[model_aliases]` — short names mapping to `provider/model` (alias chains resolved up to 10 hops)
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`

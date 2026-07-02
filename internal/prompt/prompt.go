@@ -49,6 +49,22 @@ func BuildSystem(cfg *config.Config, skills []*skill.Skill, sessionID string, en
 		fmt.Fprintf(&b, "\n\nProject instructions:\n%s", projectContent)
 	}
 
+	if !cfg.Settings.DisableClaudeMemory {
+		if memoryContent, topics, dir, truncated := readClaudeMemory(); memoryContent != "" {
+			fmt.Fprintf(&b, "\n\nClaude Code auto-memory (read-only reference from %s/MEMORY.md; learnings Claude Code captured about this project):\n%s",
+				dir, memoryContent)
+			if truncated {
+				b.WriteString("\n(index truncated — read the file directly for the full contents)")
+			}
+			if len(topics) > 0 {
+				b.WriteString("\nAdditional topic files with more detail (read on demand with the read tool):\n")
+				for _, t := range topics {
+					fmt.Fprintf(&b, "- %s\n", filepath.Join(dir, t))
+				}
+			}
+		}
+	}
+
 	return b.String()
 }
 

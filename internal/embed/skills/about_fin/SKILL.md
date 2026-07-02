@@ -64,7 +64,7 @@ The leading `#!` line is stripped before the prompt is sent. Positional args aft
 
 TOML at `~/.config/fin/config.toml`:
 - `[models]` — `primary` (main conversation model), `secondary` (title generation and any secondary tasks)
-- `[settings]` — `project_file` (default: AGENTS.md), `max_turns`, `approve`, `ui`
+- `[settings]` — `project_file` (default: AGENTS.md), `max_turns`, `approve`, `ui`, `disable_claude_memory`
 - `[settings.matching]` — tuning for `-match`: `title_weight` (default 3), `content_cap` (default 5), `recency_decay_d` (default 7), `recency_bonus` (default 0.5)
 - `[model_aliases]` — short names mapping to `provider/model` (e.g. `sonnet = "anthropic/claude-sonnet-4-6"`). Alias chains resolved up to 10 hops.
 - `[providers.*]` — `base_url`, `api_key_env`, `headers`
@@ -118,7 +118,10 @@ Per-tool configurable: auto, confirm, or deny. Shell tool supports allow/deny gl
 Rate limits (429) and server errors (5xx) retried up to 3 times with exponential backoff + jitter.
 
 ### Layered system prompt
-Assembled from: embedded base prompt → runtime context (date, OS, cwd) → skill list → `~/.agents/AGENTS.md` → project `AGENTS.md` (walks up to root). Base prompt sections are gated by `-tools` so a disabled tool's section never reaches the model.
+Assembled from: embedded base prompt → runtime context (date, OS, cwd) → skill list → `~/.agents/AGENTS.md` → project `AGENTS.md` (walks up to root) → Claude Code auto-memory. Base prompt sections are gated by `-tools` so a disabled tool's section never reaches the model.
+
+### Claude Code auto-memory pickup
+If the current project has a Claude Code auto-memory directory (`~/.claude/projects/<project>/memory/`, keyed by git root with `/` replaced by `-`, falling back to cwd outside a repo), fin reads its `MEMORY.md` index — capped at 200 lines/25KB, the same limit Claude Code itself applies — and appends it to the system prompt, along with paths to any sibling topic files the model can `read` on demand. Read-only; fin never writes to that directory. Disable with `disable_claude_memory = true` under `[settings]`. Shown in `fin -doctor`.
 
 ### Replaceable UI
 The agent talks to the UI through `agent.UIWriter`. Payloads crossing the boundary are structured data (no ANSI escapes, no pre-formatted strings). The terminal `ui` package is the current implementation; a TUI, web, or audio frontend can drop in by implementing the same interface — no agent change needed.

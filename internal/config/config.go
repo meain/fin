@@ -21,11 +21,12 @@ type Config struct {
 
 // Settings holds non-model knobs.
 type Settings struct {
-	ProjectFile string         `toml:"project_file"`
-	MaxTurns    int            `toml:"max_turns"`
-	Approve     string         `toml:"approve"` // "all", "safe", "none"
-	UI          string         `toml:"ui"`      // "default", "minimal", "quiet", "debug"
-	Matching    MatchingConfig `toml:"matching"`
+	ProjectFile         string         `toml:"project_file"`
+	MaxTurns            int            `toml:"max_turns"`
+	Approve             string         `toml:"approve"` // "all", "safe", "none"
+	UI                  string         `toml:"ui"`      // "default", "minimal", "quiet", "debug"
+	DisableClaudeMemory bool           `toml:"disable_claude_memory"`
+	Matching            MatchingConfig `toml:"matching"`
 }
 
 // MatchingConfig holds tuning constants for session matching.

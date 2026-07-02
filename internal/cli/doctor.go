@@ -10,6 +10,7 @@ import (
 	"github.com/meain/fin/internal/agent"
 	"github.com/meain/fin/internal/config"
 	"github.com/meain/fin/internal/fsutil"
+	"github.com/meain/fin/internal/prompt"
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/skill"
 	"github.com/meain/fin/internal/tool"
@@ -206,6 +207,22 @@ func printDoctor(cfg *config.Config) {
 				label = ""
 			}
 			showAgentsMD(label, p)
+		}
+	}
+	fmt.Println()
+
+	// ── Claude Code Auto-Memory ──────────────────────────────────────────
+	header("Claude Code Auto-Memory")
+	if cfg.Settings.DisableClaudeMemory {
+		row("status", dim("disabled (disable_claude_memory = true)"))
+	} else {
+		memoryPath := prompt.ClaudeMemoryPath()
+		if memoryPath == "" {
+			row("status", warn("[could not resolve project path]"))
+		} else if data, err := os.ReadFile(memoryPath); err == nil {
+			row("path", fmt.Sprintf("%-50s %s", memoryPath, ok(fmt.Sprintf("[%d bytes]", len(data)))))
+		} else {
+			row("path", fmt.Sprintf("%-50s %s", memoryPath, dim("[not found]")))
 		}
 	}
 	fmt.Println()
