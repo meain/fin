@@ -57,6 +57,8 @@ func (a *Agent) run(ctx context.Context) error {
 // runTurn runs one iteration: stream, consume, dispatch tool calls. Returns
 // done=true when the assistant emitted no tool calls (conversation ends).
 func (a *Agent) runTurn(ctx context.Context) (bool, error) {
+	a.fixDanglingToolCalls()
+
 	req := t.CompletionRequest{
 		Messages: a.messages,
 		Tools:    tool.Defs(a.tools),
@@ -181,6 +183,37 @@ func (a *Agent) applyCompact(summary string) {
 	}
 	a.save()
 	a.ui.Info("conversation compacted")
+}
+
+// fixDanglingToolCalls scans for assistant messages whose tool calls have no
+// corresponding tool_result in the following messages (e.g. process killed
+// between the two saves). Injects a synthetic "Cancelled by user" result so
+// Anthropic doesn't reject the conversation with a 400.
+func (a *Agent) fixDanglingToolCalls() {
+	fixed := make([]t.Message, 0, len(a.messages))
+	for i, msg := range a.messages {
+		fixed = append(fixed, msg)
+		if msg.Role != t.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		// Collect tool_result IDs that immediately follow this message.
+		coveredIDs := map[string]bool{}
+		for j := i + 1; j < len(a.messages) && a.messages[j].Role == t.RoleTool; j++ {
+			coveredIDs[a.messages[j].ToolCallID] = true
+		}
+		// Inject a synthetic result for any tool call without a result.
+		for _, tc := range msg.ToolCalls {
+			if !coveredIDs[tc.ID] {
+				fixed = append(fixed, t.Message{
+					Role:       t.RoleTool,
+					ToolCallID: tc.ID,
+					Content:    "Cancelled by user",
+					Timestamp:  time.Now(),
+				})
+			}
+		}
+	}
+	a.messages = fixed
 }
 
 // appendToolResults builds tool-role messages from the parallel execution
