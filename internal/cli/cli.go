@@ -819,8 +819,32 @@ func printDoctor(cfg *config.Config) {
 	if len(discovered) == 0 {
 		fmt.Printf("  %s\n", dim("(none)"))
 	} else {
+		// Group by parent directory (the skills/ dir), preserving order.
+		type skillGroup struct {
+			dir    string
+			skills []*skill.Skill
+		}
+		var groups []skillGroup
+		dirIndex := map[string]int{}
+		home := config.HomeDir()
 		for _, s := range discovered {
-			row(s.Name, fmt.Sprintf("%-40s %s", dim(s.Dir), shortDesc(s.Description, 60)))
+			parent := filepath.Dir(s.Dir)
+			if i, ok := dirIndex[parent]; ok {
+				groups[i].skills = append(groups[i].skills, s)
+			} else {
+				dirIndex[parent] = len(groups)
+				groups = append(groups, skillGroup{dir: parent, skills: []*skill.Skill{s}})
+			}
+		}
+		for _, g := range groups {
+			displayDir := g.dir
+			if home != "" {
+				displayDir = strings.Replace(displayDir, home, "~", 1)
+			}
+			fmt.Printf("  %s\n", dim(displayDir))
+			for _, s := range g.skills {
+				fmt.Printf("    %-20s %s\n", s.Name, shortDesc(s.Description, 70))
+			}
 		}
 	}
 	fmt.Println()
