@@ -46,6 +46,10 @@ func filterTools(tools []tool.Tool, enabled map[string]bool) []tool.Tool {
 	return out
 }
 
+// BuiltinSkillEntries returns the embedded built-in skill entries (name,
+// description, body). Used by BuildTools and by the doctor command.
+func BuiltinSkillEntries() []tool.SkillEntry { return loadBuiltinSkills() }
+
 // loadBuiltinSkills reads the embedded skills FS and returns one
 // tool.SkillEntry per directory containing a valid SKILL.md.
 func loadBuiltinSkills() []tool.SkillEntry {
