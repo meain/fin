@@ -60,9 +60,10 @@ const (
 	uiToolOutput   // streaming output line count update
 	uiInfo
 	uiError
-	uiSessionInfo // session resumed/created (shown in default + debug)
-	uiRetry       // retry attempt (shown in default + debug)
-	uiDebug       // only shown in debug mode
+	uiSessionInfo  // session resumed/created (shown in default + debug)
+	uiRetry        // retry attempt (shown in default + debug)
+	uiDebug        // only shown in debug mode
+	uiToolFinalize // delayed collapse of an expanded tool block once its hold elapses
 )
 
 // UIEvent is a message sent to the UI goroutine. Structured payload types
@@ -100,6 +101,12 @@ type toolLineState struct {
 	// renderedRows is how many terminal rows this tool's block occupied on
 	// the last redraw, used to compute cursor-up distance for the next one.
 	renderedRows int
+
+	// previewDuration is how long a synthetic preview stream (write, edit —
+	// tools whose content is fully known upfront) takes to finish revealing
+	// its lines. The collapse hold waits at least this long so the reveal
+	// isn't cut short.
+	previewDuration time.Duration
 }
 
 // UI handles terminal output via a single goroutine that processes events.
@@ -350,6 +357,9 @@ func (u *UI) handleEvent(ev UIEvent) {
 
 	case uiDebug:
 		u.renderDebug(ev.Debug)
+
+	case uiToolFinalize:
+		u.finalizeToolDone(ev.Index)
 	}
 }
 
@@ -429,6 +439,49 @@ func (u *UI) handleToolProgress(name, argsSoFar string) {
 // shell, ever populate this).
 const scrollbackLines = 6
 
+// minExpandedHold is the minimum time an expanded block with content (a
+// preview or streamed output) stays on screen before collapsing. Fast tools
+// like edit/write can otherwise finish inside a single terminal refresh,
+// making the expanded view an imperceptible blip.
+const minExpandedHold = 400 * time.Millisecond
+
+// previewLineDelay/previewMaxTotal control the synthetic "streaming" reveal
+// for tools whose full content is known upfront (write, edit) rather than
+// produced incrementally like shell's real output. Lines are revealed one at
+// a time so they behave like every other tool instead of flashing in fully
+// formed, capped so large files don't take forever to reveal.
+const (
+	previewLineDelay = 60 * time.Millisecond
+	previewMaxTotal  = 1200 * time.Millisecond
+)
+
+// previewDelay returns the per-line delay for animating n preview lines,
+// shrinking (down to a 10ms floor) so the total reveal never exceeds
+// previewMaxTotal.
+func previewDelay(n int) time.Duration {
+	if n <= 0 {
+		return 0
+	}
+	d := previewLineDelay
+	if time.Duration(n)*d > previewMaxTotal {
+		d = previewMaxTotal / time.Duration(n)
+	}
+	if d < 10*time.Millisecond {
+		d = 10 * time.Millisecond
+	}
+	return d
+}
+
+// streamPreview feeds lines into idx's scrollback one at a time via the same
+// ToolOutput path shell output uses, so tools with fully-known-upfront
+// content (write, edit) visibly stream instead of appearing all at once.
+func (u *UI) streamPreview(idx int, lines []string, delay time.Duration) {
+	for i, l := range lines {
+		time.Sleep(delay)
+		u.ToolOutput(idx, l, i+1)
+	}
+}
+
 func (u *UI) handleToolStart(ev UIEvent) {
 	if u.mode == OutputQuiet || u.piped {
 		return
@@ -452,12 +505,23 @@ func (u *UI) handleToolStart(ev UIEvent) {
 		u.toolLines = make([]toolLineState, ev.Total)
 	}
 
-	u.toolLines[ev.Index] = toolLineState{
+	tl := toolLineState{
 		name:    ev.Name,
 		args:    ev.Args,
 		running: true,
 		start:   time.Now(),
 	}
+	// Tools whose content is fully known upfront (write, edit) stream it into
+	// the scrollback one line at a time in the background, exactly like
+	// shell's real output, instead of showing it all at once.
+	if u.mode == OutputDefault {
+		if preview := tool.PreviewFor(ev.Name, ev.Args); len(preview) > 0 {
+			delay := previewDelay(len(preview))
+			tl.previewDuration = time.Duration(len(preview)) * delay
+			go u.streamPreview(ev.Index, preview, delay)
+		}
+	}
+	u.toolLines[ev.Index] = tl
 
 	u.redrawAllTools()
 }
@@ -472,12 +536,44 @@ func (u *UI) handleToolDone(ev UIEvent) {
 	}
 
 	tl := &u.toolLines[ev.Index]
-	tl.running = false
 	tl.result = ev.Result
 	tl.err = ev.Err
 
-	// Redraw: expanded (shell) blocks collapse to a single summary line the
-	// moment running flips false, since blockLines only expands while running.
+	// Give the expanded preview/stream a moment to actually be visible before
+	// collapsing (only applies to tools that showed or are still streaming
+	// something — plain header-only tools like read collapse immediately).
+	// Scheduled as a delayed event rather than a blocking sleep, so the
+	// single UI goroutine keeps processing the in-flight streamPreview
+	// events (and anything else) in real time instead of stalling.
+	if u.mode == OutputDefault && (len(tl.outputBuf) > 0 || tl.previewDuration > 0) {
+		hold := minExpandedHold
+		if tl.previewDuration > hold {
+			hold = tl.previewDuration
+		}
+		if remaining := hold - time.Since(tl.start); remaining > 0 {
+			idx := ev.Index
+			time.AfterFunc(remaining, func() {
+				u.send(UIEvent{Kind: uiToolFinalize, Index: idx})
+			})
+			return
+		}
+	}
+
+	u.finalizeToolDone(ev.Index)
+}
+
+// finalizeToolDone flips a tool from running (expanded) to done (collapsed)
+// and redraws. Called immediately from handleToolDone when no hold is
+// needed, or later via a uiToolFinalize event once the hold elapses.
+func (u *UI) finalizeToolDone(idx int) {
+	if idx < 0 || idx >= len(u.toolLines) {
+		return
+	}
+
+	u.toolLines[idx].running = false
+
+	// Redraw: expanded blocks collapse to a single summary line the moment
+	// running flips false, since blockLines only expands while running.
 	u.redrawAllTools()
 
 	// If all tools are done, clear the batch state.
@@ -581,7 +677,10 @@ func (u *UI) redrawAllTools() {
 		}
 		rows := 0
 		for _, l := range u.blockLines(*tl) {
-			fmt.Fprintln(stdout, l)
+			// Raw mode disables OPOST, so a bare "\n" won't return the
+			// cursor to column 0 — write "\r\n" explicitly like the other
+			// cursor-movement writes in this function do.
+			fmt.Fprint(stdout, l+"\r\n")
 			rows += rowsFor(l)
 		}
 		tl.renderedRows = rows

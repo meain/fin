@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
@@ -27,6 +28,15 @@ func (wt *WriteTool) PrimaryArg(args map[string]any) string {
 func (wt *WriteTool) Label(args map[string]any) ToolLabel {
 	path, _ := args["path"].(string)
 	return ToolLabel{Primary: path}
+}
+
+// Preview returns the content lines to show in the expanded live view. The
+// full content is already known before Run executes, so there's nothing to
+// stream incrementally — the whole thing is shown (scrollback trims it to
+// the last few lines, same as a running shell command).
+func (wt *WriteTool) Preview(args map[string]any) []string {
+	content, _ := args["content"].(string)
+	return previewLines(strings.TrimRight(content, "\n"))
 }
 
 func (wt *WriteTool) Parameters() map[string]any {

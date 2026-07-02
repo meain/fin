@@ -37,6 +37,24 @@ func (et *EditTool) Label(args map[string]any) ToolLabel {
 	}
 }
 
+// Preview returns a diff-style preview ("- " removed lines, then "+ "
+// added lines) for the expanded live view. Both strings are fully known
+// before Run executes, so this shows the whole diff — scrollback trims it
+// to the last few lines, same as a running shell command.
+func (et *EditTool) Preview(args map[string]any) []string {
+	old, _ := args["old_string"].(string)
+	nw, _ := args["new_string"].(string)
+
+	var lines []string
+	for _, l := range previewLines(old) {
+		lines = append(lines, "- "+l)
+	}
+	for _, l := range previewLines(nw) {
+		lines = append(lines, "+ "+l)
+	}
+	return lines
+}
+
 func (et *EditTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
