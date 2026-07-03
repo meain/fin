@@ -598,7 +598,11 @@ func (u *UI) blockLines(tl toolLineState) []string {
 	if u.isExpanded(tl) {
 		lines := make([]string, 0, 1+len(tl.outputBuf))
 		lines = append(lines, fmt.Sprintf("%s%s%s%s", render.Bold, render.Yellow, toolLabel(tl.name, tl.args), render.Reset))
+		// -2 for the "  " indent, -5 margin of error so slightly-off
+		// width calculations (wide runes, etc.) don't still wrap.
+		maxOutput := getTermWidth() - 2 - 5
 		for _, o := range tl.outputBuf {
+			o = render.Truncate(o, maxOutput)
 			lines = append(lines, fmt.Sprintf("  %s%s%s", render.Dim, o, render.Reset))
 		}
 		return lines
