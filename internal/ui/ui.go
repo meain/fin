@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +123,7 @@ type UI struct {
 	wroteText         bool
 	hasProgress       bool
 	lastProgressLines int
+	lastProgressPath  string
 	toolLines         []toolLineState
 }
 
@@ -409,25 +412,71 @@ func (u *UI) renderDebug(ev agent.DebugEvent) {
 
 // --- Tool progress (streaming args) ---
 
+// toolsWithPathArg is the set of tools whose primary argument is a "path"
+// field, so streaming progress can extract and show it as soon as it's
+// parseable — no need to wait for the rest of the (possibly large)
+// arguments, e.g. write/edit's full file content, to finish streaming.
+var toolsWithPathArg = map[string]bool{
+	"read":  true,
+	"write": true,
+	"edit":  true,
+}
+
+// pathArgRe matches a "path":"..." field inside a raw (possibly incomplete)
+// JSON tool-call argument string.
+var pathArgRe = regexp.MustCompile(`"path"\s*:\s*"((?:\\.|[^"\\])*)"`)
+
+// extractPathArg does a best-effort scan for a complete "path" field inside
+// a partial JSON string. Returns "" if the field hasn't fully streamed in
+// yet (no closing quote found).
+func extractPathArg(argsSoFar string) string {
+	m := pathArgRe.FindStringSubmatch(argsSoFar)
+	if m == nil {
+		return ""
+	}
+	if unquoted, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+		return unquoted
+	}
+	return m[1]
+}
+
 func (u *UI) handleToolProgress(name, argsSoFar string) {
 	if u.mode == OutputQuiet || u.piped {
 		return
 	}
 
 	lines := strings.Count(argsSoFar, "\\n") + strings.Count(argsSoFar, "\n")
-	if lines == 0 {
-		return
+
+	path := ""
+	if toolsWithPathArg[name] {
+		path = extractPathArg(argsSoFar)
 	}
-	if lines == u.lastProgressLines {
+
+	if lines == u.lastProgressLines && path == u.lastProgressPath {
 		return
 	}
 	u.lastProgressLines = lines
+	u.lastProgressPath = path
+
+	// Nothing worth showing yet: no path known (or not applicable) and no
+	// content lines streamed in either.
+	if path == "" && lines == 0 {
+		return
+	}
 
 	if !u.hasProgress {
 		u.ensureNewline()
 	}
 
-	fmt.Fprintf(stdout, "\r\033[2K%s%s%s %s(%d lines)%s", render.Yellow, name, render.Reset, render.Dim, lines, render.Reset)
+	line := fmt.Sprintf("%s%s%s", render.Yellow, name, render.Reset)
+	if path != "" {
+		line += fmt.Sprintf(" %s%s%s", render.Dim, path, render.Reset)
+	}
+	if lines > 0 {
+		line += fmt.Sprintf(" %s(%d lines)%s", render.Dim, lines, render.Reset)
+	}
+
+	fmt.Fprintf(stdout, "\r\033[2K%s", line)
 	stdout.Sync()
 	u.hasProgress = true
 }
@@ -499,6 +548,7 @@ func (u *UI) handleToolStart(ev UIEvent) {
 			fmt.Fprint(stdout, "\033[2K\r")
 			u.hasProgress = false
 			u.lastProgressLines = 0
+			u.lastProgressPath = ""
 		} else {
 			u.ensureNewline()
 		}
@@ -705,6 +755,7 @@ func (u *UI) renderToolCallPreApproval(name string, args map[string]any) {
 		fmt.Fprint(stdout, "\033[2K\r")
 		u.hasProgress = false
 		u.lastProgressLines = 0
+		u.lastProgressPath = ""
 	} else {
 		u.ensureNewline()
 	}
@@ -747,6 +798,7 @@ func (u *UI) ensureNewline() {
 		fmt.Fprint(stdout, "\033[2K\r")
 		u.hasProgress = false
 		u.lastProgressLines = 0
+		u.lastProgressPath = ""
 	}
 	if u.wroteText {
 		u.write("\n")
