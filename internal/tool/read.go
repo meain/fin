@@ -71,32 +71,86 @@ func (rt *ReadTool) Run(_ context.Context, args map[string]any) (t.ToolResult, e
 	}
 	path = fsutil.ExpandHome(path)
 
-	info, err := os.Stat(path)
+	if _, err := os.Lstat(path); err != nil && os.IsNotExist(err) {
+		if resolved, ok := resolveByWhitespaceVariant(path); ok {
+			path = resolved
+		}
+	}
+
+	chain, finalPath, hopLimitReached := resolveSymlinkChain(path)
+	note := symlinkNote(chain, hopLimitReached)
+
+	info, err := os.Stat(finalPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			if resolved, ok := resolveByWhitespaceVariant(path); ok {
-				path = resolved
-				info, err = os.Stat(path)
-			}
+		if note != "" {
+			return t.ToolResult{}, fmt.Errorf("%sfailed to stat %s: %w", note, finalPath, err)
 		}
-		if err != nil {
-			return t.ToolResult{}, fmt.Errorf("failed to stat %s: %w", path, err)
-		}
+		return t.ToolResult{}, fmt.Errorf("failed to stat %s: %w", finalPath, err)
 	}
 
 	if info.IsDir() {
-		content, err := readDir(path)
-		return t.ToolResult{Content: content}, err
+		content, err := readDir(finalPath)
+		return t.ToolResult{Content: note + content}, err
 	}
 
 	// Check if it's an image
-	ext := strings.ToLower(filepath.Ext(path))
+	ext := strings.ToLower(filepath.Ext(finalPath))
 	if mediaType, ok := imageExtensions[ext]; ok {
-		return readImage(path, mediaType)
+		result, err := readImage(finalPath, mediaType)
+		result.Content = note + result.Content
+		return result, err
 	}
 
-	content, err := readFile(path, args)
-	return t.ToolResult{Content: content}, err
+	content, err := readFile(finalPath, args)
+	return t.ToolResult{Content: note + content}, err
+}
+
+// maxSymlinkHops caps symlink-chain resolution to avoid infinite loops on
+// cyclic links.
+const maxSymlinkHops = 10
+
+// resolveSymlinkChain follows symlinks starting at path one hop at a time,
+// up to maxSymlinkHops, and returns the full chain visited (starting with
+// path itself), the final path reached, and whether resolution stopped
+// because the hop limit was hit while the last entry was still a symlink.
+// If path is not a symlink, the chain has a single entry and finalPath ==
+// path. Relative link targets are resolved against the directory of the
+// link that contains them.
+func resolveSymlinkChain(path string) (chain []string, finalPath string, hopLimitReached bool) {
+	chain = []string{path}
+	current := path
+	hops := 0
+	for {
+		lst, err := os.Lstat(current)
+		if err != nil || lst.Mode()&os.ModeSymlink == 0 {
+			return chain, current, false
+		}
+		if hops >= maxSymlinkHops {
+			return chain, current, true
+		}
+		target, err := os.Readlink(current)
+		if err != nil {
+			return chain, current, false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(current), target)
+		}
+		current = target
+		chain = append(chain, current)
+		hops++
+	}
+}
+
+// symlinkNote returns a note describing a symlink chain (as produced by
+// resolveSymlinkChain), or "" if chain has no links to report.
+func symlinkNote(chain []string, hopLimitReached bool) string {
+	if len(chain) < 2 {
+		return ""
+	}
+	if hopLimitReached {
+		return fmt.Sprintf("[symlink (stopped after %d hops, not fully resolved): %s]\n\n", maxSymlinkHops, strings.Join(chain, " -> "))
+	}
+	return fmt.Sprintf("[symlink: %s]\n\n", strings.Join(chain, " -> "))
 }
 
 // normalizeSpaces collapses any Unicode space character (regular space,
