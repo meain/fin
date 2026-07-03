@@ -31,16 +31,32 @@ func forEachVisibleRune(s string, fn func(r rune, visible bool) bool) {
 	}
 }
 
-// VisibleLen returns the number of visible (non-ANSI-escape) characters in s.
+// tabWidth is the column width a terminal expands a tab character to,
+// matching common terminal defaults.
+const tabWidth = 8
+
+// advanceCol returns the terminal column after printing r, starting from
+// col. Tabs advance to the next tab stop; everything else advances by one
+// column.
+func advanceCol(col int, r rune) int {
+	if r == '\t' {
+		return col + tabWidth - col%tabWidth
+	}
+	return col + 1
+}
+
+// VisibleLen returns the visible (non-ANSI-escape) width of s in terminal
+// columns, expanding tabs to the next tab stop rather than counting them as
+// a single character.
 func VisibleLen(s string) int {
-	n := 0
-	forEachVisibleRune(s, func(_ rune, visible bool) bool {
+	col := 0
+	forEachVisibleRune(s, func(r rune, visible bool) bool {
 		if visible {
-			n++
+			col = advanceCol(col, r)
 		}
 		return true
 	})
-	return n
+	return col
 }
 
 // Truncate trims s (which may contain ANSI codes) so the total visible width
@@ -61,20 +77,21 @@ func Truncate(s string, maxVisible int) string {
 	}
 
 	var out strings.Builder
-	visible := 0
+	col := 0
 	truncated := false
 	forEachVisibleRune(s, func(r rune, isVisible bool) bool {
 		if !isVisible {
 			out.WriteRune(r)
 			return true
 		}
-		if visible >= cutoff {
+		next := advanceCol(col, r)
+		if next > cutoff {
 			out.WriteString("…" + Reset)
 			truncated = true
 			return false
 		}
+		col = next
 		out.WriteRune(r)
-		visible++
 		return true
 	})
 	if !truncated {
