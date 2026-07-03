@@ -692,12 +692,14 @@ func (u *UI) collapsedLine(tl toolLineState) string {
 }
 
 // rowsFor returns how many terminal rows a rendered line occupies once the
-// terminal wraps it, so cursor-movement math stays correct for long lines.
+// terminal wraps it, so cursor-movement math stays correct for long lines
+// (e.g. a shell command's full label, which is allowed to wrap rather than
+// be truncated). Uses the raw terminal width, not getTermWidth()'s -1
+// safety margin — the terminal itself wraps at the real column count, and
+// using a narrower width here would under-count wraps and drift the
+// cursor-up math on every redraw.
 func rowsFor(s string) int {
-	w := getTermWidth()
-	if w <= 0 {
-		w = 80
-	}
+	w := rawTermWidth()
 	vl := render.VisibleLen(s)
 	if vl == 0 {
 		return 1
@@ -812,12 +814,22 @@ func (u *UI) debugLine(text string) {
 	u.write(fmt.Sprintf("%s│ %s%s\n", render.DimFg, text, render.Reset))
 }
 
+// getTermWidth returns the terminal width minus a 1-col safety margin, for
+// callers that truncate content to guarantee it never wraps (labels,
+// scrollback output lines).
 func getTermWidth() int {
+	return rawTermWidth() - 1
+}
+
+// rawTermWidth returns the actual terminal column count (no safety margin),
+// for callers reasoning about how the terminal itself will wrap content
+// (rowsFor's cursor-movement math).
+func rawTermWidth() int {
 	w, _, _ := term.GetSize(int(os.Stdout.Fd()))
 	if w <= 0 {
 		w = 80
 	}
-	return w - 1 // leave 1 col to prevent terminal line wrap
+	return w
 }
 
 // toolLabel renders a tool name plus its structured ToolLabel as a terminal
