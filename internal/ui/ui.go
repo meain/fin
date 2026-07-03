@@ -648,12 +648,17 @@ func (u *UI) blockLines(tl toolLineState) []string {
 	if u.isExpanded(tl) {
 		lines := make([]string, 0, 1+len(tl.outputBuf))
 		lines = append(lines, fmt.Sprintf("%s%s%s%s", render.Bold, render.Yellow, toolLabel(tl.name, tl.args), render.Reset))
-		// -2 for the "  " indent, -5 margin of error so slightly-off
-		// width calculations (wide runes, etc.) don't still wrap.
-		maxOutput := getTermWidth() - 2 - 5
+		// -5 margin of error so slightly-off width calculations (wide
+		// runes, etc.) don't still wrap. Truncate the indent together with
+		// the content (rather than truncating o alone and prepending the
+		// indent after) so tab stops are computed from the real starting
+		// column -- truncating o in isolation would expand any tabs in o
+		// as if it started at column 0, diverging from its actual printed
+		// position and letting the real terminal wrap it instead.
+		maxOutput := getTermWidth() - 5
 		for _, o := range tl.outputBuf {
-			o = render.Truncate(o, maxOutput)
-			lines = append(lines, fmt.Sprintf("  %s%s%s", render.Dim, o, render.Reset))
+			indented := render.Truncate("  "+o, maxOutput)
+			lines = append(lines, fmt.Sprintf("%s%s%s", render.Dim, indented, render.Reset))
 		}
 		return lines
 	}
