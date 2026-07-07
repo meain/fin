@@ -39,6 +39,11 @@ fin -f script.fin "extra args"         # file prompt + positional args appended
 fin -tools read,shell "prompt"         # restrict tool set (also: all, none)
 fin -temp "quick question"             # mark session as temporary (skipped by -c, shown as [temp] in listings)
 fin -c -temp "follow up"               # continue the last temp session
+fin -tag work "prompt"                 # tag session as "work" (shown as #work in listings)
+fin -c -t work "follow up"             # continue last session tagged "work"
+fin -c -t -work "follow up"            # continue last session NOT tagged "work"
+fin -sessions -t work                  # list sessions tagged "work"
+fin -sessions -t -work                 # list sessions NOT tagged "work"
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
 fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
@@ -93,6 +98,7 @@ Progressive disclosure: only skill names and descriptions are loaded at startup.
 - mtime conflict detection: refuses to overwrite if another `fin` process modified the file since load, to avoid clobbering concurrent runs.
 - Reader tolerates a truncated trailing line (crash mid-append) so earlier messages stay readable.
 - UUID-based with prefix matching (`fin -s abc12` works). Named sessions via `-n`. Match recent sessions to the current prompt with `-match`.
+- Tag sessions with `-tag <name>` or `-t <name>`. Use `-t <name>` with `-c` or `-sessions` to filter by tag; prefix with `-` (e.g. `-t -work`) to exclude sessions with that tag.
 - Fork sessions with `-fork`: copies all messages into a new session with `previous_session` pointing to the origin. Forks are shown grouped under their parent in `fin -sessions` (TTY) and as a flat array with `parent_id` in JSON. Exports walk the full ancestor chain root-first.
 
 ### Export

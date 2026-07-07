@@ -23,6 +23,7 @@ type Session struct {
 	Name            string      `json:"name,omitempty"`
 	PreviousSession string      `json:"previous_session,omitempty"`
 	Temp            bool        `json:"temp,omitempty"`
+	Tags            []string    `json:"tags,omitempty"`
 	StartedAt       time.Time   `json:"started_at"`
 	Messages        []t.Message `json:"messages"`
 }
@@ -38,6 +39,7 @@ type sessionHeader struct {
 	Name            string    `json:"name,omitempty"`
 	PreviousSession string    `json:"previous_session,omitempty"`
 	Temp            bool      `json:"temp,omitempty"`
+	Tags            []string  `json:"tags,omitempty"`
 	StartedAt       time.Time `json:"started_at"`
 }
 

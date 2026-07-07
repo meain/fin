@@ -54,6 +54,7 @@ func readFile(path string) (*Session, error) {
 		Name:            header.Name,
 		PreviousSession: header.PreviousSession,
 		Temp:            header.Temp,
+		Tags:            header.Tags,
 		StartedAt:       header.StartedAt,
 	}
 
@@ -85,6 +86,33 @@ func readFile(path string) (*Session, error) {
 		sess.Messages = append(sess.Messages, *pending)
 	}
 	return sess, nil
+}
+
+// readHeader reads only the first JSON line of a session file and returns the
+// parsed header. Used for cheap tag/metadata checks without loading messages.
+func readHeader(path string) (*sessionHeader, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 1<<25)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var h sessionHeader
+		if err := json.Unmarshal(line, &h); err != nil {
+			return nil, err
+		}
+		return &h, nil
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("no header found in %s", path)
 }
 
 // parseFiles reads and parses the given session files in parallel (8 workers).

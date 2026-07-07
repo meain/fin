@@ -26,6 +26,7 @@ type Writer struct {
 	previousSession string
 	title           string // LLM-generated title override
 	temp            bool
+	tags            []string
 	started         time.Time
 	filepath        string
 
@@ -37,7 +38,7 @@ type Writer struct {
 
 // NewWriter creates a new session file and returns a writer for incremental
 // saves. If id is empty, a new UUID is generated.
-func NewWriter(id, model, name string, temp bool) *Writer {
+func NewWriter(id, model, name string, temp bool, tags []string) *Writer {
 	dir := config.SessionPath()
 	os.MkdirAll(dir, 0755)
 
@@ -55,12 +56,13 @@ func NewWriter(id, model, name string, temp bool) *Writer {
 	}
 
 	return &Writer{
-		id:      id,
-		model:   model,
-		cwd:     cwd,
-		name:    name,
-		temp:    temp,
-		started: time.Now(),
+		id:       id,
+		model:    model,
+		cwd:      cwd,
+		name:     name,
+		temp:     temp,
+		tags:     tags,
+		started:  time.Now(),
 		filepath: filepath.Join(dir, filename),
 	}
 }
@@ -91,6 +93,7 @@ func WriterForExisting(sess *Session) *Writer {
 		previousSession: sess.PreviousSession,
 		title:           sess.Title,
 		temp:            sess.Temp,
+		tags:            sess.Tags,
 		started:         sess.StartedAt,
 		filepath:        fp,
 		headerDirty:     true,
@@ -104,10 +107,19 @@ func WriterForExisting(sess *Session) *Writer {
 // ID returns the writer's session ID.
 func (w *Writer) ID() string { return w.id }
 
+// Tags returns the current tag list.
+func (w *Writer) Tags() []string { return w.tags }
+
 // SetPreviousSession records the previous session UUID (used after compaction
 // to link the new session back to its predecessor).
 func (w *Writer) SetPreviousSession(id string) {
 	w.previousSession = id
+	w.headerDirty = true
+}
+
+// SetTags replaces the session's tag list. Triggers a full-rewrite on the next Save.
+func (w *Writer) SetTags(tags []string) {
+	w.tags = tags
 	w.headerDirty = true
 }
 
@@ -195,6 +207,7 @@ func (w *Writer) fullRewrite(messages []t.Message) error {
 		Name:            w.name,
 		PreviousSession: w.previousSession,
 		Temp:            w.temp,
+		Tags:            w.tags,
 		StartedAt:       w.started,
 	}
 

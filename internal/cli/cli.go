@@ -62,6 +62,8 @@ func Run() int {
 	secondaryModel := flag.String("secondary-model", "", "model for title generation (overrides config)")
 	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
 	doctor := flag.Bool("doctor", false, "print diagnostic info: tools, models, skills, AGENTS.md files")
+	tag := flag.String("tag", "", "tag for this session; with -c or -sessions, filters by tag")
+	flag.StringVar(tag, "t", "", "tag (short)")
 	flag.Parse()
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -106,7 +108,7 @@ func Run() int {
 			}
 			sinceTime = t
 		}
-		printSessions(limit, sinceTime)
+		printSessions(limit, sinceTime, *tag)
 		return 0
 	}
 
@@ -127,6 +129,9 @@ func Run() int {
 		}
 		if *temp {
 			return session.LoadLastTemp()
+		}
+		if *tag != "" {
+			return session.LoadLastWithTag(*tag)
 		}
 		return session.LoadLast()
 	}
@@ -314,20 +319,29 @@ func Run() int {
 		}
 		u.SessionInfo(agent.SessionInfoData{Resumed: true, Label: label, StartedAt: resumedSession.StartedAt})
 	}
+	// Build tag slice from flag (empty string means no tag).
+	var sessionTags []string
+	if *tag != "" {
+		sessionTags = []string{*tag}
+	}
+
 	if forkParentID != "" {
 		// Fork: new session with parent link, messages copied from origin.
-		sw = session.NewWriter(sessionID, fullModel, "", *temp)
+		sw = session.NewWriter(sessionID, fullModel, "", *temp, sessionTags)
 		sw.SetPreviousSession(forkParentID)
 		ag.SetMessages(resumedSession.Messages)
 		u.SessionInfo(agent.SessionInfoData{Label: sessionID[:8] + " (fork of " + forkParentID[:8] + ")"})
 	}
 	if sw == nil {
 		if *name != "" {
-			sw = session.NewWriter(sessionID, fullModel, *name, *temp)
+			sw = session.NewWriter(sessionID, fullModel, *name, *temp, sessionTags)
 			u.SessionInfo(agent.SessionInfoData{Label: *name})
 		} else {
-			sw = session.NewWriter(sessionID, fullModel, "", *temp)
+			sw = session.NewWriter(sessionID, fullModel, "", *temp, sessionTags)
 		}
+	} else if len(sessionTags) > 0 {
+		// Resuming an existing session: merge in any new tag if not already present.
+		sw.SetTags(mergeTags(sw.Tags(), sessionTags))
 	}
 	var saveWarned bool
 	ag.OnUpdate = func(msgs []t.Message) {
@@ -338,7 +352,7 @@ func Run() int {
 	}
 	ag.OnCompact = func() {
 		prevID := sw.ID()
-		sw = session.NewWriter("", fullModel, "", false)
+		sw = session.NewWriter("", fullModel, "", false, nil)
 		sw.SetPreviousSession(prevID)
 	}
 
@@ -479,8 +493,25 @@ loop:
 // printSessions renders the session list. Outputs JSON when stdout is not a
 // terminal; otherwise renders a colored, fixed-width table with forks grouped
 // under their parents. Pure data lives in session.LoadSummaries.
-func printSessions(limit int, since time.Time) {
-	sessions, total, err := session.LoadSummaries(limit, since)
+// mergeTags returns a copy of base with any tags from extra appended that are
+// not already present.
+func mergeTags(base, extra []string) []string {
+	result := make([]string, len(base))
+	copy(result, base)
+	set := make(map[string]bool, len(base))
+	for _, t := range base {
+		set[t] = true
+	}
+	for _, t := range extra {
+		if !set[t] {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+func printSessions(limit int, since time.Time, tag string) {
+	sessions, total, err := session.LoadSummaries(limit, since, tag)
 	if err != nil || len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
@@ -572,6 +603,9 @@ func printSessions(limit int, since time.Time) {
 		}
 		if sess.Temp {
 			short = short + render.Dim + " [temp]" + render.Reset
+		}
+		if len(sess.Tags) > 0 {
+			short = short + render.Dim + " #" + strings.Join(sess.Tags, " #") + render.Reset
 		}
 
 		meta := fmt.Sprintf("(%s, %d msgs)", age, msgCount)

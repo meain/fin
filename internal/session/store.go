@@ -131,11 +131,45 @@ func LoadLastTemp() (*Session, error) {
 	return nil, fmt.Errorf("no temp sessions found")
 }
 
+// LoadLastWithTag loads the most recently modified permanent session matching
+// the tag filter. A tag prefixed with "-" negates the filter (sessions that do
+// NOT have that tag). Reads only the header of each candidate file for speed.
+func LoadLastWithTag(tag string) (*Session, error) {
+	exclude := strings.HasPrefix(tag, "-")
+	if exclude {
+		tag = tag[1:]
+	}
+	es, err := permanentEntries()
+	if err != nil || len(es) == 0 {
+		return nil, fmt.Errorf("no sessions found")
+	}
+	for _, e := range es {
+		h, err := readHeader(e.path)
+		if err != nil {
+			continue
+		}
+		hasTag := false
+		for _, t := range h.Tags {
+			if t == tag {
+				hasTag = true
+				break
+			}
+		}
+		if hasTag != exclude {
+			return readFile(e.path)
+		}
+	}
+	if exclude {
+		return nil, fmt.Errorf("no session without tag %q found", tag)
+	}
+	return nil, fmt.Errorf("no session with tag %q found", tag)
+}
+
 // LoadSummaries returns up to limit recent sessions (limit<=0 means no
-// limit), optionally filtered by since. Returns the parsed sessions plus
-// the total number of candidates that passed the since filter so callers
-// can show "showing N of M". Pure data — no I/O on stdout.
-func LoadSummaries(limit int, since time.Time) ([]Session, int, error) {
+// limit), optionally filtered by since and/or tag. Returns the parsed sessions
+// plus the total number of candidates after all filters so callers can show
+// "showing N of M". Pure data — no I/O on stdout.
+func LoadSummaries(limit int, since time.Time, tag string) ([]Session, int, error) {
 	es, err := entries()
 	if err != nil {
 		return nil, 0, err
@@ -150,16 +184,49 @@ func LoadSummaries(limit int, since time.Time) ([]Session, int, error) {
 		}
 		es = kept
 	}
-	total := len(es)
-	if limit > 0 && total > limit {
-		es = es[:limit]
+
+	// No tag filter: fast path — limit before parsing.
+	if tag == "" {
+		total := len(es)
+		if limit > 0 && total > limit {
+			es = es[:limit]
+		}
+		paths := make([]string, len(es))
+		for i, e := range es {
+			paths[i] = e.path
+		}
+		return parseFiles(paths), total, nil
 	}
 
+	// Tag filter: parse all candidates, then filter, then limit.
+	// A leading "-" on the tag means exclude sessions that have it.
+	exclude := strings.HasPrefix(tag, "-")
+	if exclude {
+		tag = tag[1:]
+	}
 	paths := make([]string, len(es))
 	for i, e := range es {
 		paths[i] = e.path
 	}
-	return parseFiles(paths), total, nil
+	all := parseFiles(paths)
+	filtered := make([]Session, 0, len(all))
+	for _, s := range all {
+		hasTag := false
+		for _, st := range s.Tags {
+			if st == tag {
+				hasTag = true
+				break
+			}
+		}
+		if hasTag != exclude {
+			filtered = append(filtered, s)
+		}
+	}
+	total := len(filtered)
+	if limit > 0 && total > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, total, nil
 }
 
 // Summary is a lightweight representation for JSON output.
@@ -169,6 +236,7 @@ type Summary struct {
 	Model        string    `json:"model"`
 	Name         string    `json:"name,omitempty"`
 	Temp         bool      `json:"temp,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
 	ParentID     string    `json:"parent_id,omitempty"`
 	StartedAt    time.Time `json:"started_at"`
 	MessageCount int       `json:"message_count"`
@@ -192,6 +260,7 @@ func SummariesJSON(sessions []Session) ([]byte, error) {
 			Model:        sess.Model,
 			Name:         sess.Name,
 			Temp:         sess.Temp,
+			Tags:         sess.Tags,
 			ParentID:     sess.PreviousSession,
 			StartedAt:    sess.StartedAt,
 			MessageCount: msgCount,

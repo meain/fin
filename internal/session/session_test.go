@@ -132,7 +132,7 @@ func TestWriter_ResumeAppends(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	w := NewWriter("resume-id", "m", "", false)
+	w := NewWriter("resume-id", "m", "", false, nil)
 	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestWriter_ResumeDetectsExternalWrite(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 
-	w := NewWriter("ext-test", "m", "", false)
+	w := NewWriter("ext-test", "m", "", false, nil)
 	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "first"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestLoadSummaries_AllRecent(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	sessions, total, err := LoadSummaries(-1, time.Time{})
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestLoadSummaries_SinceFilter(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	since := time.Now().Add(-24 * time.Hour)
-	sessions, total, err := LoadSummaries(-1, since)
+	sessions, total, err := LoadSummaries(-1, since, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -85,6 +85,13 @@ Live under `internal/embed/`:
 - `skills/about_fin/SKILL.md` — builtin skill describing fin itself. **Keep in sync** when adding/removing user-visible features — it is loaded into the LLM's context to answer "what is fin / what can fin do" questions; stale entries actively mislead.
 - `hljs.min.js`, `hljs.min.css` — bundled into HTML export
 
+## Documentation checklist
+
+When adding a user-visible feature, update all three places:
+- **`AGENTS.md` CLI flags section** — add the new flag(s) with a comment
+- **`internal/embed/skills/about_fin/SKILL.md`** — update the usage block and any relevant feature description; this file is loaded into the LLM context so stale entries actively mislead
+- **`internal/embed/skills/about_fin/SKILL.md` session management / feature section** — update prose descriptions if the feature touches sessions or a major subsystem
+
 ## Conventions
 
 - Raw HTTP for all LLM providers — no provider SDKs
@@ -127,6 +134,11 @@ fin -s <uuid> -fork "prompt"    # fork a specific session
 fin -secondary-model provider/model "prompt"  # override secondary model (title generation)
 fin -temp "quick question"       # mark session as temporary (skipped by -c, shown as [temp])
 fin -c -temp "follow up"        # continue the last temp session
+fin -tag work "prompt"          # tag session as "work"
+fin -c -t work "follow up"      # continue last session tagged "work"
+fin -c -t -work "follow up"     # continue last session NOT tagged "work"
+fin -sessions -t work           # list sessions tagged "work"
+fin -sessions -t -work          # list sessions NOT tagged "work"
 fin -q message words here       # queue a message into the last running session's FIFO
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session
