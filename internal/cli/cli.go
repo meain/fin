@@ -23,6 +23,7 @@ import (
 	"github.com/meain/fin/internal/approval"
 	"github.com/meain/fin/internal/config"
 	"github.com/meain/fin/internal/export"
+	"github.com/meain/fin/internal/jsonui"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/render"
 	"github.com/meain/fin/internal/session"
@@ -50,7 +51,7 @@ func Run() int {
 	exportFlag := flag.String("export", "", "export format: json, html, message")
 	approve := flag.String("approve", "", "tool approval mode: all, safe, none")
 	yolo := flag.Bool("yolo", false, "alias for -approve all")
-	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet, debug")
+	uiMode := flag.String("ui", "", "output mode: default, minimal, quiet, debug, json")
 	match := flag.Bool("match", false, "search recent sessions and offer to continue a matching one")
 	colorMode := flag.String("color", "auto", "color output: auto, always, never")
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
@@ -207,19 +208,36 @@ func Run() int {
 		outMode = ui.ParseOutputMode(*uiMode)
 	}
 
+	// jsonMode drives a machine-readable JSONL frontend (GUI apps). stdin is
+	// reserved for approval replies, so piped-input detection is skipped below.
+	jsonMode := *uiMode == "json"
+
 	// Auto-detect piped stdout: suppress chrome, only stream response text.
 	// Explicit -ui flag overrides this.
 	piped := *uiMode == "" && !term.IsTerminal(int(os.Stdout.Fd()))
+
+	// newUI builds the active frontend. Both concrete UIs satisfy this.
+	newUI := func() interface {
+		agent.UIWriter
+		Close()
+	} {
+		if jsonMode {
+			return jsonui.New()
+		}
+		return ui.New(nil, outMode, piped)
+	}
 
 	skills := skill.Discover(cfg)
 
 	args := flag.Args()
 
 	var pipedInput string
-	if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
-		data, err := io.ReadAll(os.Stdin)
-		if err == nil && len(data) > 0 {
-			pipedInput = string(data)
+	if !jsonMode {
+		if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
+			data, err := io.ReadAll(os.Stdin)
+			if err == nil && len(data) > 0 {
+				pipedInput = string(data)
+			}
 		}
 	}
 
@@ -235,7 +253,7 @@ func Run() int {
 	} else if *cont || *sessionFlag != "" || *fork {
 		sess, err := loadSession()
 		if err != nil {
-			u := ui.New(nil, outMode, piped)
+			u := newUI()
 			u.Error(err.Error())
 			u.Close()
 			return 1
@@ -283,7 +301,7 @@ func Run() int {
 		sessionID = uuid.New().String()
 	}
 
-	u := ui.New(nil, outMode, piped)
+	u := newUI()
 	defer u.Close()
 	ag := agent.New(agent.NewProviderInjector(p, modelName), fullModel, cfg, app, u, skills, sessionID, enabledTools)
 
