@@ -38,12 +38,12 @@ func newAnthropicProvider(apiKey, baseURL string, httpClient *http.Client) Provi
 // --- Anthropic wire types ---
 
 type anthRequest struct {
-	Model     string           `json:"model"`
-	MaxTokens int              `json:"max_tokens"`
+	Model     string            `json:"model"`
+	MaxTokens int               `json:"max_tokens"`
 	System    []anthSystemBlock `json:"system,omitempty"`
-	Messages  []anthMessage    `json:"messages"`
-	Tools     []anthTool       `json:"tools,omitempty"`
-	Stream    bool             `json:"stream"`
+	Messages  []anthMessage     `json:"messages"`
+	Tools     []anthTool        `json:"tools,omitempty"`
+	Stream    bool              `json:"stream"`
 }
 
 type anthCacheControl struct {
@@ -133,6 +133,15 @@ type anthErrorEvent struct {
 
 // --- Conversion: Message -> anthMessage ---
 
+// isToolErrorContent reports whether a tool-result message's content
+// represents a failed tool call, so the wire request can set is_error and
+// let the model recognize/adapt to failures. The only place that formats a
+// tool failure (agent.errorWithContext) produces "Error (<context>): ...",
+// never a bare "Error: " prefix, so match that actual format.
+func isToolErrorContent(content string) bool {
+	return strings.HasPrefix(content, "Error (")
+}
+
 func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs []anthMessage) {
 	for _, m := range msgs {
 		switch m.Role {
@@ -196,14 +205,14 @@ func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs [
 					Type:      "tool_result",
 					ToolUseID: m.ToolCallID,
 					Content:   contentBlocks,
-					IsError:   strings.HasPrefix(m.Content, "Error: "),
+					IsError:   isToolErrorContent(m.Content),
 				}
 			} else {
 				block = anthContentBlock{
 					Type:      "tool_result",
 					ToolUseID: m.ToolCallID,
 					Content:   &m.Content,
-					IsError:   strings.HasPrefix(m.Content, "Error: "),
+					IsError:   isToolErrorContent(m.Content),
 				}
 			}
 			// Merge consecutive tool results into one user message

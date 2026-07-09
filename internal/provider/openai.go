@@ -57,6 +57,7 @@ type oaiImageURL struct {
 }
 
 type oaiToolCall struct {
+	Index    int    `json:"index"`
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type"`
 	Function struct {
@@ -230,10 +231,17 @@ func (s *openaiStream) Recv() (t.StreamDelta, error) {
 
 		line, err := s.reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
-				s.done = true
+			if err != io.EOF {
+				return t.StreamDelta{}, err
 			}
-			return t.StreamDelta{}, err
+			// EOF: the connection can close right after the final chunk
+			// without a trailing newline. Mark done so the *next* call
+			// returns EOF immediately, but still parse this last partial
+			// line below instead of discarding it.
+			s.done = true
+			if line == "" {
+				return t.StreamDelta{}, io.EOF
+			}
 		}
 
 		line = strings.TrimSpace(line)
@@ -263,6 +271,7 @@ func (s *openaiStream) Recv() (t.StreamDelta, error) {
 		}
 		for _, tc := range chunk.Choices[0].Delta.ToolCalls {
 			delta.ToolCalls = append(delta.ToolCalls, t.ToolCallDelta{
+				Index:     tc.Index,
 				ID:        tc.ID,
 				Name:      tc.Function.Name,
 				Arguments: tc.Function.Arguments,

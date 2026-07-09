@@ -156,8 +156,10 @@ func TestMessagesToAnthropic_ToolResult(t *testing.T) {
 }
 
 func TestMessagesToAnthropic_ToolResultError(t *testing.T) {
+	// Matches the actual format produced by agent.errorWithContext:
+	// "Error (<context>): <err>" — not a bare "Error: " prefix.
 	msgs := []tp.Message{
-		{Role: tp.RoleTool, Content: "Error: something went wrong", ToolCallID: "tc_1"},
+		{Role: tp.RoleTool, Content: "Error (shell $ foo): something went wrong", ToolCallID: "tc_1"},
 	}
 	_, anthMsgs := messagesToAnthropic(msgs)
 	blocks := anthMsgs[0].Content.([]anthContentBlock)

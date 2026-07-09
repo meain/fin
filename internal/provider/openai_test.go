@@ -1,11 +1,78 @@
 package provider
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
 
 	tp "github.com/meain/fin/internal/types"
 )
+
+// newTestOpenAIStream builds an openaiStream over a static SSE-style body
+// (no real HTTP body/Close needed for Recv-only tests).
+func newTestOpenAIStream(body string) *openaiStream {
+	return &openaiStream{reader: bufio.NewReader(strings.NewReader(body))}
+}
+
+// TestOpenAIStream_ParallelToolCallIndex guards a bug where the wire
+// "index" field on each streamed tool-call delta chunk (used to multiplex
+// fragments across multiple simultaneous tool calls) was silently dropped,
+// so every delta reported Index 0 and consumeStream collapsed all parallel
+// tool calls in a turn into one corrupted bucket.
+func TestOpenAIStream_ParallelToolCallIndex(t *testing.T) {
+	body := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}]}}]}
+` +
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"read","arguments":"{\"path\":\"b\"}"}}]}}]}
+` +
+		`data: [DONE]` + "\n"
+
+	s := newTestOpenAIStream(body)
+
+	var deltas []tp.ToolCallDelta
+	for {
+		d, err := s.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		deltas = append(deltas, d.ToolCalls...)
+	}
+
+	if len(deltas) != 2 {
+		t.Fatalf("expected 2 tool call deltas, got %d: %+v", len(deltas), deltas)
+	}
+	if deltas[0].Index != 0 || deltas[0].ID != "call_1" {
+		t.Fatalf("expected first delta Index=0 ID=call_1, got %+v", deltas[0])
+	}
+	if deltas[1].Index != 1 || deltas[1].ID != "call_2" {
+		t.Fatalf("expected second delta Index=1 ID=call_2, got %+v", deltas[1])
+	}
+}
+
+// TestOpenAIStream_TrailingLineWithoutNewline guards against dropping the
+// final SSE chunk when the connection closes immediately after it without a
+// trailing newline (io.EOF returned together with a non-empty line).
+func TestOpenAIStream_TrailingLineWithoutNewline(t *testing.T) {
+	body := `data: {"choices":[{"delta":{"content":"hi"}}]}` // no trailing \n
+	s := newTestOpenAIStream(body)
+
+	d, err := s.Recv()
+	if err != nil {
+		t.Fatalf("expected the final unterminated line to be processed, got err=%v", err)
+	}
+	if d.Content != "hi" {
+		t.Fatalf("expected content %q, got %q", "hi", d.Content)
+	}
+
+	_, err = s.Recv()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF after the trailing line is consumed, got %v", err)
+	}
+}
 
 func TestMessagesToOpenAI_Basic(t *testing.T) {
 	msgs := []tp.Message{
