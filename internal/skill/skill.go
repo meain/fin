@@ -55,29 +55,37 @@ func ParseMD(data []byte) (*Skill, error) {
 }
 
 // Discover finds all skills in the standard locations: project .agents/skills/
-// directories walked up from cwd, then ~/.agents/skills/. Returns skills with
-// Body cleared (progressive disclosure).
-func Discover(_ *config.Config) []*Skill {
+// directories walked up from cwd, then ~/.agents/skills/, then any extra
+// directories configured via settings.skills_dirs (each expected to directly
+// contain <name>/SKILL.md subdirectories, like a skills/ folder). Returns
+// skills with Body cleared (progressive disclosure). Earlier locations win on
+// name collisions.
+func Discover(cfg *config.Config) []*Skill {
 	var skills []*Skill
 	seen := map[string]bool{}
 
-	fsutil.WalkUpFromCwd(func(dir string) {
-		skillsDir := filepath.Join(dir, config.AgentsDir, config.SkillsDirName)
-		for _, s := range scanDir(skillsDir) {
+	add := func(found []*Skill) {
+		for _, s := range found {
 			if !seen[s.Name] {
 				seen[s.Name] = true
 				skills = append(skills, s)
 			}
 		}
+	}
+
+	fsutil.WalkUpFromCwd(func(dir string) {
+		skillsDir := filepath.Join(dir, config.AgentsDir, config.SkillsDirName)
+		add(scanDir(skillsDir))
 	})
 
 	if h := config.HomeDir(); h != "" {
 		userDir := filepath.Join(h, config.AgentsDir, config.SkillsDirName)
-		for _, s := range scanDir(userDir) {
-			if !seen[s.Name] {
-				seen[s.Name] = true
-				skills = append(skills, s)
-			}
+		add(scanDir(userDir))
+	}
+
+	if cfg != nil {
+		for _, dir := range cfg.Settings.SkillsDirs {
+			add(scanDir(fsutil.ExpandHome(dir)))
 		}
 	}
 

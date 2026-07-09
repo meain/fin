@@ -90,7 +90,7 @@ Anthropic Claude, OpenAI, and any OpenAI-compatible API (Groq, OpenRouter, Ollam
 - **compact** — summarizes the conversation into a new session, dropping older context
 
 ### Agent skills (agentskills.io spec)
-Progressive disclosure: only skill names and descriptions are loaded at startup. Full instructions load on activation. Skills are discovered from `.agents/skills/` in the project (walks up to root) and `~/.agents/skills/` globally. Follows symlinks. Builtin skills are embedded in the binary.
+Progressive disclosure: only skill names and descriptions are loaded at startup. Full instructions load on activation. Skills are discovered from `.agents/skills/` in the project (walks up to root), `~/.agents/skills/` globally, and any extra directories listed in `settings.skills_dirs` in the config (each expected to directly hold `<name>/SKILL.md` subdirs). Follows symlinks. Builtin skills are embedded in the binary.
 
 ### Session management
 - Sessions saved incrementally as **JSONL** in `~/.local/share/fin/sessions/`. First line is a session header (id, title, model, cwd, started_at); each subsequent line is one message.

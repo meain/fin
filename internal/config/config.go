@@ -27,6 +27,7 @@ type Settings struct {
 	UI                  string         `toml:"ui"`      // "default", "minimal", "quiet", "debug"
 	DisableClaudeMemory bool           `toml:"disable_claude_memory"`
 	Matching            MatchingConfig `toml:"matching"`
+	SkillsDirs          []string       `toml:"skills_dirs"` // extra directories to scan for skills (each holds <name>/SKILL.md subdirs)
 }
 
 // MatchingConfig holds tuning constants for session matching.
