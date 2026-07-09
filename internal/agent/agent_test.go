@@ -71,7 +71,7 @@ type fakeTool struct {
 	tracker *concurrencyTracker
 }
 
-func (ft *fakeTool) Name() string              { return ft.name }
+func (ft *fakeTool) Name() string               { return ft.name }
 func (ft *fakeTool) Description() string        { return "fake" }
 func (ft *fakeTool) Parameters() map[string]any { return map[string]any{} }
 func (ft *fakeTool) Run(_ context.Context, _ map[string]any) (tp.ToolResult, error) {
@@ -398,7 +398,8 @@ func TestToolError_PropagatedCorrectly(t *testing.T) {
 	if toolMsg.ToolCallID != "c1" {
 		t.Errorf("tool call id=%s, want c1", toolMsg.ToolCallID)
 	}
-	if toolMsg.Content != "Error: "+io.ErrUnexpectedEOF.Error() {
-		t.Errorf("tool error content=%q, want %q", toolMsg.Content, "Error: "+io.ErrUnexpectedEOF.Error())
+	want := "Error (failing): " + io.ErrUnexpectedEOF.Error()
+	if toolMsg.Content != want {
+		t.Errorf("tool error content=%q, want %q", toolMsg.Content, want)
 	}
 }

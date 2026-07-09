@@ -81,4 +81,3 @@ type ToolResult struct {
 	Images      []Image
 	SubMessages []Message // subagent conversation (for export)
 }
-
