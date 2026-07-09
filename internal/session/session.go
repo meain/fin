@@ -52,8 +52,10 @@ func TitleFromFirstMessage(messages []t.Message) string {
 		}
 		s := strings.TrimSpace(m.Content)
 		s = strings.Join(strings.Fields(s), " ")
-		if len(s) > 50 {
-			s = s[:50] + "…"
+		// Truncate by rune, not byte, so multi-byte UTF-8 titles (non-ASCII
+		// text, emoji, etc.) aren't cut mid-rune into invalid UTF-8.
+		if runes := []rune(s); len(runes) > 50 {
+			s = string(runes[:50]) + "…"
 		}
 		return s
 	}

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	t2 "github.com/meain/fin/internal/types"
 )
@@ -30,6 +32,22 @@ func TestTitleFromFirstMessage_Truncates(t *testing.T) {
 	}
 	if title[:50] != long[:50] {
 		t.Errorf("expected title to start with first 50 chars")
+	}
+}
+
+// TestTitleFromFirstMessage_TruncatesMultiByteRunes guards against byte-based
+// slicing (s[:50]) cutting a multi-byte UTF-8 rune in half, which produces
+// invalid UTF-8 that renders as mojibake wherever the title is shown.
+func TestTitleFromFirstMessage_TruncatesMultiByteRunes(t *testing.T) {
+	long := strings.Repeat("世", 60) // each rune is 3 bytes; 60 runes > 50-rune cutoff
+	title := TitleFromFirstMessage([]t2.Message{{Role: t2.RoleUser, Content: long}})
+	if !utf8.ValidString(title) {
+		t.Fatalf("truncated title is not valid UTF-8: %q", title)
+	}
+	runes := []rune(title)
+	// 50 content runes + the ellipsis rune appended.
+	if len(runes) != 51 {
+		t.Fatalf("expected 51 runes (50 + ellipsis), got %d: %q", len(runes), title)
 	}
 }
 
@@ -500,6 +518,64 @@ func TestLoadSummaries_AllRecent(t *testing.T) {
 	}
 	if len(sessions) != 2 || total != 2 {
 		t.Errorf("expected 2/2, got %d/%d", len(sessions), total)
+	}
+}
+
+// TestEntries_NamePrefixNotMisdetectedAsTemp guards against unanchored
+// substring matching on "_temp": a fully permanent session named e.g.
+// "foo_temp_report" must not be misclassified as temporary just because
+// "_temp" appears somewhere in its filename.
+func TestEntries_NamePrefixNotMisdetectedAsTemp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	w := NewWriter("", "test/model", "foo_temp_report", false, nil)
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "hi", Timestamp: time.Now()}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	es, err := entries()
+	if err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	if len(es) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(es))
+	}
+	if es[0].temp {
+		t.Errorf("session named %q was misclassified as temp", w.name)
+	}
+
+	perm, err := permanentEntries()
+	if err != nil {
+		t.Fatalf("permanentEntries: %v", err)
+	}
+	if len(perm) != 1 {
+		t.Errorf("expected the permanent session to be included, permanentEntries returned %d", len(perm))
+	}
+}
+
+// TestLoadByName_FindsNamedTempSession guards against LoadByName's glob
+// pattern ("*_<name>.jsonl") failing to match a named session that was also
+// created with -temp, whose filename carries a trailing "_temp" suffix after
+// the name ("..._<name>_temp.jsonl").
+func TestLoadByName_FindsNamedTempSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	w := NewWriter("", "test/model", "mysession", true, nil)
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "hi", Timestamp: time.Now()}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	sess, err := LoadByName("mysession")
+	if err != nil {
+		t.Fatalf("LoadByName(%q) failed: %v", "mysession", err)
+	}
+	if sess.ID != w.ID() {
+		t.Errorf("expected session ID %q, got %q", w.ID(), sess.ID)
+	}
+	if !sess.Temp {
+		t.Errorf("expected loaded session to be marked temp")
 	}
 }
 

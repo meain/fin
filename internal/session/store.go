@@ -40,7 +40,12 @@ func entries() ([]entry, error) {
 		if err != nil {
 			continue
 		}
-		temp := strings.Contains(e.Name(), "_temp")
+		// Anchor to the trailing "_temp" component (before the .jsonl
+		// extension) rather than an unanchored substring match, so a named
+		// session like "foo_temp_report" isn't misclassified as temporary
+		// just because "_temp" appears somewhere in its name.
+		base := strings.TrimSuffix(e.Name(), ".jsonl")
+		temp := strings.HasSuffix(base, "_temp")
 		out = append(out, entry{
 			path:  filepath.Join(dir, e.Name()),
 			name:  e.Name(),
@@ -99,12 +104,26 @@ func LoadByID(id string) (*Session, error) {
 }
 
 // LoadByName loads a session by its trailing-name segment in the filename.
+// Matches both permanent ("..._<name>.jsonl") and temp ("..._<name>_temp.jsonl")
+// session files, since the temp suffix always trails the name in the filename
+// layout written by Writer.
 func LoadByName(name string) (*Session, error) {
 	dir := config.SessionPath()
 	matches, err := filepath.Glob(filepath.Join(dir, "*_"+name+".jsonl"))
-	if err != nil || len(matches) == 0 {
+	if err != nil {
 		return nil, fmt.Errorf("session %q not found", name)
 	}
+	tempMatches, err := filepath.Glob(filepath.Join(dir, "*_"+name+"_temp.jsonl"))
+	if err != nil {
+		return nil, fmt.Errorf("session %q not found", name)
+	}
+	matches = append(matches, tempMatches...)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("session %q not found", name)
+	}
+	// Filenames are timestamp-prefixed, so lexicographic order is
+	// chronological; re-sort after merging the two glob results.
+	sort.Strings(matches)
 	return readFile(matches[len(matches)-1])
 }
 
