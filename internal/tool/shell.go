@@ -103,6 +103,13 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 	go func() {
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdoutPipe)
+		// bufio.Scanner's default max token size is 64KB; a single line longer
+		// than that (e.g. minified/base64 output with no newline) would make
+		// Scan() fail with ErrTooLong and stop reading, leaving the pipe
+		// undrained. Since cmd.Wait() requires all pipe reads to complete, the
+		// child would then block on write() until the shell timeout kills it.
+		// Raise the cap generously so that only pathological output hits it.
+		scanner.Buffer(make([]byte, 64<<10), 10<<20) // up to 10 MiB per line
 		for scanner.Scan() {
 			mu.Lock()
 			stdout.Write(scanner.Bytes())

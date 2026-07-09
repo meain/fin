@@ -19,8 +19,10 @@ func (s *SubagentTool) Name() string { return "subagent" }
 
 func (s *SubagentTool) Label(args map[string]any) ToolLabel {
 	task, _ := args["task"].(string)
-	if len(task) > 60 {
-		task = task[:60] + "…"
+	// Truncate by rune, not byte: task text is free-form LLM output and may
+	// contain multi-byte UTF-8 near the cutoff.
+	if runes := []rune(task); len(runes) > 60 {
+		task = string(runes[:60]) + "…"
 	}
 	return ToolLabel{Primary: task}
 }
