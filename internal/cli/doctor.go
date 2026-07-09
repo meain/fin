@@ -35,8 +35,9 @@ func printDoctor(cfg *config.Config) {
 			s = s[:i]
 		}
 		s = strings.TrimSpace(s)
-		if len(s) > maxLen {
-			s = s[:maxLen-1] + "…"
+		// Truncate by rune, not byte, to avoid cutting multi-byte UTF-8 mid-rune.
+		if runes := []rune(s); len(runes) > maxLen {
+			s = string(runes[:maxLen-1]) + "…"
 		}
 		return s
 	}
@@ -108,7 +109,7 @@ func printDoctor(cfg *config.Config) {
 
 	// ── Tools ─────────────────────────────────────────────────────────────
 	tools := tool.BuiltinTools()
-	tools = append(tools, &tool.SkillTool{})   // include use_skill
+	tools = append(tools, &tool.SkillTool{})    // include use_skill
 	tools = append(tools, &tool.SubagentTool{}) // include subagent
 	header(fmt.Sprintf("Tools (%d)", len(tools)))
 	for _, tl := range tools {

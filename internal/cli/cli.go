@@ -147,12 +147,23 @@ func Run() int {
 			fmt.Fprintf(os.Stderr, "queue: %v\n", err)
 			return 1
 		}
+
 		fifoPath := fifoPathForSession(sess.ID)
-		wf, err := os.OpenFile(fifoPath, os.O_WRONLY, 0)
+		// Open O_WRONLY|O_NONBLOCK: a plain O_WRONLY open blocks until a
+		// reader is present, so a stale FIFO left behind by a crashed/killed
+		// `fin` process (no live reader) would hang this command forever.
+		// With O_NONBLOCK, an open with no reader fails fast with ENXIO,
+		// which is exactly the "no active session" case we want to report.
+		fd, err := syscall.Open(fifoPath, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "queue: no active session (FIFO not found: %s)\n", fifoPath)
 			return 1
 		}
+		// A reader is connected, so drop O_NONBLOCK before writing: we want
+		// the write itself to block/retry normally rather than risk EAGAIN
+		// on a short message.
+		_ = syscall.SetNonblock(fd, false)
+		wf := os.NewFile(uintptr(fd), fifoPath)
 		defer wf.Close()
 		fmt.Fprintln(wf, msg)
 		return 0
@@ -597,7 +608,10 @@ func printSessions(limit int, since time.Time, tag string) {
 		}
 
 		age := render.RelativeTime(session.LastMessageTime(*sess))
-		short := sess.ID[:8]
+		short := sess.ID
+		if len(short) > 8 {
+			short = short[:8]
+		}
 		if sess.Name != "" {
 			short = fmt.Sprintf("%s [%s]", short, sess.Name)
 		}
