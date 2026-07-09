@@ -48,6 +48,31 @@ func TestBlockLinesTruncatesLongOutputLines(t2 *testing.T) {
 	}
 }
 
+// TestToolStartSkippedFirstIndex guards a crash: when the first item in a
+// parallel tool batch fails pre-approval (denied by the user, unknown tool,
+// bad JSON args), the agent never calls ui.ToolStart for that index at all
+// (only ToolDone, with the error). toolLines used to only get allocated when
+// ev.Index == 0 arrived, so if index 0 is skipped, the first ToolStart the UI
+// actually receives is for a later index, and writing into the unallocated
+// (nil) slice panicked with "index out of range".
+func TestToolStartSkippedFirstIndex(t2 *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t2.Fatalf("handleToolStart panicked when index 0 was skipped: %v", r)
+		}
+	}()
+
+	u := New(nil, OutputDefault, false)
+	defer u.Close()
+
+	// Index 0 denied: only ToolDone is ever sent for it, never ToolStart.
+	u.ToolDone(0, "write", map[string]any{"path": "x"}, t.ToolResult{}, fmt.Errorf("tool call denied by user"))
+	// Index 1 approved and runs normally: this used to panic because
+	// toolLines was never allocated (only index==0 triggered allocation).
+	u.ToolStart(1, 2, "read", map[string]any{"path": "foo.go"})
+	u.ToolDone(1, "read", map[string]any{"path": "foo.go"}, t.ToolResult{Content: "ok"}, nil)
+}
+
 // TestShellLongOutputDoesNotOverflow is an end-to-end guard: streaming a
 // long real shell output line through ToolOutput must never produce a
 // rendered frame line wider than the terminal.

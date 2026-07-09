@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meain/fin/internal/agent"
@@ -119,6 +120,12 @@ type UI struct {
 	events chan UIEvent
 	done   chan struct{}
 
+	// closeMu guards closed and serializes it against send/sendSync so a
+	// send can never race Close's close(events) (which would panic with
+	// "send on closed channel").
+	closeMu sync.Mutex
+	closed  bool
+
 	// State managed exclusively by the run() goroutine:
 	wroteText         bool
 	hasProgress       bool
@@ -144,18 +151,31 @@ func New(t *input.Terminal, mode OutputMode, piped bool) *UI {
 	return u
 }
 
-// Close shuts down the UI goroutine. Safe to call multiple times.
+// Close shuts down the UI goroutine. Safe to call multiple times, and safe
+// to call concurrently with in-flight send/sendSync calls (e.g. from tool
+// goroutines still streaming output).
 func (u *UI) Close() {
 	if u.events == nil {
 		return
 	}
+	u.closeMu.Lock()
+	if u.closed {
+		u.closeMu.Unlock()
+		return
+	}
+	u.closed = true
 	close(u.events)
+	u.closeMu.Unlock()
 	<-u.done
-	u.events = nil
 }
 
 func (u *UI) send(ev UIEvent) {
 	if u.events == nil {
+		return
+	}
+	u.closeMu.Lock()
+	defer u.closeMu.Unlock()
+	if u.closed {
 		return
 	}
 	u.events <- ev
@@ -166,7 +186,13 @@ func (u *UI) sendSync(ev UIEvent) bool {
 	if u.events == nil {
 		return false
 	}
+	u.closeMu.Lock()
+	if u.closed {
+		u.closeMu.Unlock()
+		return false
+	}
 	u.events <- ev
+	u.closeMu.Unlock()
 	return <-ev.Reply
 }
 
@@ -542,8 +568,13 @@ func (u *UI) handleToolStart(ev UIEvent) {
 		return
 	}
 
-	// First tool in batch: clear progress, allocate lines.
-	if ev.Index == 0 {
+	// First ToolStart of a fresh batch: clear progress, allocate lines.
+	// Triggered on toolLines being unallocated/the wrong size rather than
+	// ev.Index == 0: item 0 may have been skipped entirely (denied at the
+	// approval prompt, unknown tool, bad JSON args all short-circuit before
+	// ToolStart is ever sent for that index), so the first ToolStart this
+	// UI actually receives for a batch can have any index.
+	if len(u.toolLines) != ev.Total {
 		if u.hasProgress {
 			fmt.Fprint(stdout, "\033[2K\r")
 			u.hasProgress = false
@@ -571,7 +602,9 @@ func (u *UI) handleToolStart(ev UIEvent) {
 			go u.streamPreview(ev.Index, preview, delay)
 		}
 	}
-	u.toolLines[ev.Index] = tl
+	if ev.Index >= 0 && ev.Index < len(u.toolLines) {
+		u.toolLines[ev.Index] = tl
+	}
 
 	u.redrawAllTools()
 }
