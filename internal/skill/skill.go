@@ -59,8 +59,9 @@ func ParseMD(data []byte) (*Skill, error) {
 // directories configured via settings.skills_dirs (each expected to directly
 // contain <name>/SKILL.md subdirectories, like a skills/ folder). Returns
 // skills with Body cleared (progressive disclosure). Earlier locations win on
-// name collisions.
-func Discover(cfg *config.Config) []*Skill {
+// name collisions. When skipProject is true, the cwd walk-up is skipped so
+// only global (~/.agents/skills/ and skills_dirs) skills are returned.
+func Discover(cfg *config.Config, skipProject bool) []*Skill {
 	var skills []*Skill
 	seen := map[string]bool{}
 
@@ -73,10 +74,12 @@ func Discover(cfg *config.Config) []*Skill {
 		}
 	}
 
-	fsutil.WalkUpFromCwd(func(dir string) {
-		skillsDir := filepath.Join(dir, config.AgentsDir, config.SkillsDirName)
-		add(scanDir(skillsDir))
-	})
+	if !skipProject {
+		fsutil.WalkUpFromCwd(func(dir string) {
+			skillsDir := filepath.Join(dir, config.AgentsDir, config.SkillsDirName)
+			add(scanDir(skillsDir))
+		})
+	}
 
 	if h := config.HomeDir(); h != "" {
 		userDir := filepath.Join(h, config.AgentsDir, config.SkillsDirName)

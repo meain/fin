@@ -63,6 +63,7 @@ func Run() int {
 	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
 	doctor := flag.Bool("doctor", false, "print diagnostic info: tools, models, skills, AGENTS.md files")
 	tag := flag.String("tag", "", "tag for this session; with -c or -sessions, filters by tag")
+	noProject := flag.Bool("no-project", false, "skip project-specific AGENTS.md and skill directories")
 	flag.StringVar(tag, "t", "", "tag (short)")
 	flag.Parse()
 
@@ -87,6 +88,9 @@ func Run() int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		return 1
+	}
+	if *noProject {
+		cfg.Settings.ProjectFile = ""
 	}
 
 	if *doctor {
@@ -243,7 +247,7 @@ func Run() int {
 		return ui.New(nil, outMode, piped)
 	}
 
-	skills := skill.Discover(cfg)
+	skills := skill.Discover(cfg, *noProject)
 
 	args := flag.Args()
 

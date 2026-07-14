@@ -47,6 +47,7 @@ fin -sessions -t -work                 # list sessions NOT tagged "work"
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
 fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
+fin -no-project "prompt"               # skip project AGENTS.md and project skill dirs (global-only context)
 ```
 
 ## Shebang scripts
@@ -124,7 +125,7 @@ Per-tool configurable: auto, confirm, or deny. Shell tool supports allow/deny gl
 Rate limits (429) and server errors (5xx) retried up to 3 times with exponential backoff + jitter.
 
 ### Layered system prompt
-Assembled from: embedded base prompt → runtime context (date, OS, cwd) → skill list → `~/.agents/AGENTS.md` → project `AGENTS.md` (walks up to root) → Claude Code auto-memory. Base prompt sections are gated by `-tools` so a disabled tool's section never reaches the model.
+Assembled from: embedded base prompt → runtime context (date, OS, cwd) → skill list → `~/.agents/AGENTS.md` → project `AGENTS.md` (walks up to root) → Claude Code auto-memory. Base prompt sections are gated by `-tools` so a disabled tool's section never reaches the model. `-no-project` drops the project `AGENTS.md` layer and the project-level `.agents/skills/` walk-up, keeping only global (`~/.agents/`) context.
 
 ### Claude Code auto-memory pickup
 If the current project has a Claude Code auto-memory directory (`~/.claude/projects/<project>/memory/`, keyed by git root with `/` replaced by `-`, falling back to cwd outside a repo), fin reads its `MEMORY.md` index — capped at 200 lines/25KB, the same limit Claude Code itself applies — and appends it to the system prompt, along with paths to any sibling topic files the model can `read` on demand. Read-only; fin never writes to that directory. Disable with `disable_claude_memory = true` under `[settings]`. Shown in `fin -doctor`.

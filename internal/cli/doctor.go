@@ -141,7 +141,7 @@ func printDoctor(cfg *config.Config) {
 	fmt.Println()
 
 	// ── Discovered Skills ─────────────────────────────────────────────────
-	discovered := skill.Discover(cfg)
+	discovered := skill.Discover(cfg, false)
 	header(fmt.Sprintf("Discovered Skills (%d)", len(discovered)))
 	if len(discovered) == 0 {
 		fmt.Printf("  %s\n", dim("(none)"))
