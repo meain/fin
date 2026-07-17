@@ -39,6 +39,7 @@ fin -f script.fin "extra args"         # file prompt + positional args appended
 fin -tools read,shell "prompt"         # restrict tool set (also: all, none)
 fin -temp "quick question"             # mark session as temporary (skipped by -c, shown as [temp] in listings)
 fin -c -temp "follow up"               # continue the last temp session
+fin -sessions -temp                    # list only temp sessions
 fin -tag work "prompt"                 # tag session as "work" (shown as #work in listings)
 fin -c -t work "follow up"             # continue last session tagged "work"
 fin -c -t -work "follow up"            # continue last session NOT tagged "work"

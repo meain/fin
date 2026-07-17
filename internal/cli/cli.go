@@ -58,7 +58,7 @@ func Run() int {
 	maxTurns := flag.Int("max-turns", 0, "max agent loop iterations (overrides config)")
 	promptFile := flag.String("f", "", "read prompt from file (for shebang scripts)")
 	toolsFlag := flag.String("tools", "", "tools to enable: all, none, or comma-separated list (e.g. read,shell)")
-	temp := flag.Bool("temp", false, "mark session as temporary (skipped by -c, -sessions shows [temp])")
+	temp := flag.Bool("temp", false, "mark session as temporary; with -sessions, show only temp sessions")
 	fork := flag.Bool("fork", false, "fork the current (or -s/-n) session into a new one and continue")
 	secondaryModel := flag.String("secondary-model", "", "model for title generation (overrides config)")
 	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
@@ -129,7 +129,7 @@ func Run() int {
 			}
 			sinceTime = t
 		}
-		printSessions(limit, sinceTime, *tag, currentRepo, *runningFlag)
+		printSessions(limit, sinceTime, *tag, currentRepo, *runningFlag, *temp)
 		return 0
 	}
 
@@ -557,7 +557,7 @@ func mergeTags(base, extra []string) []string {
 	return result
 }
 
-func printSessions(limit int, since time.Time, tag string, repo string, runningOnly bool) {
+func printSessions(limit int, since time.Time, tag string, repo string, runningOnly bool, tempOnly bool) {
 	// When filtering to running sessions, the FIFO-liveness check happens
 	// after loading, so fetch every candidate first and apply limit after
 	// filtering (same trick LoadSummaries itself uses for the tag filter).
@@ -565,7 +565,7 @@ func printSessions(limit int, since time.Time, tag string, repo string, runningO
 	if runningOnly {
 		fetchLimit = -1
 	}
-	sessions, total, err := session.LoadSummaries(fetchLimit, since, tag, repo)
+	sessions, total, err := session.LoadSummaries(fetchLimit, since, tag, repo, tempOnly)
 	if err != nil || len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return

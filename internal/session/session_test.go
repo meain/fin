@@ -529,7 +529,7 @@ func TestLoadSummaries_AllRecent(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "")
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestLoadSummaries_SinceFilter(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	since := time.Now().Add(-24 * time.Hour)
-	sessions, total, err := LoadSummaries(-1, since, "", "")
+	sessions, total, err := LoadSummaries(-1, since, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,7 +676,7 @@ func TestLoadSummaries_RepoFilter(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "fin")
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "fin", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,6 +685,50 @@ func TestLoadSummaries_RepoFilter(t *testing.T) {
 	}
 	if sessions[0].ID != "reposesh1-0000-0000-0000-000000000000" {
 		t.Errorf("expected fin-repo session, got %q", sessions[0].ID)
+	}
+}
+
+func TestLoadSummaries_TempFilter(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSessionWithRepo(t, sessDir, "permsesh1-0000-0000-0000-000000000000", time.Hour, "fin", nil)
+
+	// Write a temp session directly since writeTestSessionWithRepo always
+	// builds non-temp filenames.
+	tempID := "tempsesh1-0000-0000-0000-000000000000"
+	backdated := time.Now().Add(-2 * time.Hour)
+	filename := buildFilename(backdated.Format("20060102-150405"), tempID, "fin", "", true)
+	path := filepath.Join(sessDir, filename)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(sessionHeader{ID: tempID, Title: "temp session", Model: "test/model", Repo: "fin", StartedAt: backdated}); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Encode(t2.Message{Role: t2.RoleUser, Content: "test", Timestamp: backdated}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, backdated, backdated); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || total != 1 {
+		t.Fatalf("expected 1/1 temp session, got %d/%d", len(sessions), total)
+	}
+	if sessions[0].ID != tempID {
+		t.Errorf("expected temp session, got %q", sessions[0].ID)
 	}
 }
 

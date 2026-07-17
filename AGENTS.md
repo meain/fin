@@ -136,6 +136,7 @@ fin -s <uuid> -fork "prompt"    # fork a specific session
 fin -secondary-model provider/model "prompt"  # override secondary model (title generation)
 fin -temp "quick question"       # mark session as temporary (skipped by -c, shown as [temp])
 fin -c -temp "follow up"        # continue the last temp session
+fin -sessions -temp             # list only temp sessions
 fin -tag work "prompt"          # tag session as "work"
 fin -c -t work "follow up"      # continue last session tagged "work"
 fin -c -t -work "follow up"     # continue last session NOT tagged "work"

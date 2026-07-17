@@ -194,10 +194,10 @@ func LoadLastWithFilter(tag, repo string) (*Session, error) {
 }
 
 // LoadSummaries returns up to limit recent sessions (limit<=0 means no
-// limit), optionally filtered by since, tag, and/or repo. Returns the parsed
-// sessions plus the total number of candidates after all filters so callers
-// can show "showing N of M". Pure data — no I/O on stdout.
-func LoadSummaries(limit int, since time.Time, tag string, repo string) ([]Session, int, error) {
+// limit), optionally filtered by since, tag, repo, and/or tempOnly. Returns
+// the parsed sessions plus the total number of candidates after all filters
+// so callers can show "showing N of M". Pure data — no I/O on stdout.
+func LoadSummaries(limit int, since time.Time, tag string, repo string, tempOnly bool) ([]Session, int, error) {
 	es, err := entries()
 	if err != nil {
 		return nil, 0, err
@@ -219,6 +219,17 @@ func LoadSummaries(limit int, since time.Time, tag string, repo string) ([]Sessi
 		kept := es[:0]
 		for _, e := range es {
 			if e.repo == repo {
+				kept = append(kept, e)
+			}
+		}
+		es = kept
+	}
+
+	// Temp filter: also checked from the filename alone (no I/O).
+	if tempOnly {
+		kept := es[:0]
+		for _, e := range es {
+			if e.temp {
 				kept = append(kept, e)
 			}
 		}

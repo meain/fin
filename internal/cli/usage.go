@@ -46,7 +46,7 @@ var usageGroups = []usageGroup{
 		flags: []usageFlag{
 			{"-tag, -t <tag>", "with -c/-sessions, filter by tag (prefix - to exclude)"},
 			{"-repo", "with -c/-sessions, filter to sessions in the current repo"},
-			{"-temp", "mark session temporary (-c skips it unless -temp is also passed)"},
+			{"-temp", "mark session temporary; with -sessions, show only temp sessions"},
 			{"-since <dur>", "filter sessions by age: 1h, 2d, 1w (with -sessions)"},
 			{"-running", "with -sessions, filter to sessions with a live process"},
 			{"-all", "show all sessions (with -sessions)"},
