@@ -67,6 +67,7 @@ func Run() int {
 	tag := flag.String("tag", "", "tag for this session; with -c or -sessions, filters by tag")
 	repoFlag := flag.Bool("repo", false, "with -c or -sessions, filter to sessions in the current repo")
 	noProject := flag.Bool("no-project", false, "skip project-specific AGENTS.md and skill directories")
+	runningFlag := flag.Bool("running", false, "with -sessions, filter to sessions that are currently running")
 	flag.StringVar(tag, "t", "", "tag (short)")
 	flag.Parse()
 
@@ -128,7 +129,7 @@ func Run() int {
 			}
 			sinceTime = t
 		}
-		printSessions(limit, sinceTime, *tag, currentRepo)
+		printSessions(limit, sinceTime, *tag, currentRepo, *runningFlag)
 		return 0
 	}
 
@@ -557,11 +558,36 @@ func mergeTags(base, extra []string) []string {
 	return result
 }
 
-func printSessions(limit int, since time.Time, tag string, repo string) {
-	sessions, total, err := session.LoadSummaries(limit, since, tag, repo)
+func printSessions(limit int, since time.Time, tag string, repo string, runningOnly bool) {
+	// When filtering to running sessions, the FIFO-liveness check happens
+	// after loading, so fetch every candidate first and apply limit after
+	// filtering (same trick LoadSummaries itself uses for the tag filter).
+	fetchLimit := limit
+	if runningOnly {
+		fetchLimit = -1
+	}
+	sessions, total, err := session.LoadSummaries(fetchLimit, since, tag, repo)
 	if err != nil || len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
+	}
+
+	if runningOnly {
+		kept := sessions[:0]
+		for _, s := range sessions {
+			if isSessionRunning(s.ID) {
+				kept = append(kept, s)
+			}
+		}
+		sessions = kept
+		total = len(sessions)
+		if limit > 0 && len(sessions) > limit {
+			sessions = sessions[:limit]
+		}
+		if len(sessions) == 0 {
+			fmt.Fprintf(os.Stderr, "no running sessions found\n")
+			return
+		}
 	}
 
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -762,6 +788,20 @@ func promptSessionMatch(query string, mc config.MatchingConfig) *session.Session
 // fifoPathForSession returns the FIFO path for a session by ID.
 func fifoPathForSession(id string) string {
 	return filepath.Join(os.TempDir(), "fin-"+id+".fifo")
+}
+
+// isSessionRunning reports whether a `fin` process is currently running the
+// given session — i.e. its FIFO exists and has a live reader. Same
+// O_WRONLY|O_NONBLOCK probe the -q flag uses to detect a dead/absent
+// session, but here we only care whether it succeeds, so the fd is closed
+// immediately without writing anything.
+func isSessionRunning(id string) bool {
+	fd, err := syscall.Open(fifoPathForSession(id), syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return false
+	}
+	syscall.Close(fd)
+	return true
 }
 
 // startFIFOReader opens the FIFO at path and returns a channel that receives
