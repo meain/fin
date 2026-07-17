@@ -146,6 +146,7 @@ fin -sessions -repo             # list sessions created in the current repo
 fin -q message words here       # queue a message into the last running session's FIFO
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session
+pbpaste | fin -q "message"      # queued message can include piped stdin, same as fin/fin -c
 fin -doctor                     # print diagnostic summary: tools, models, skills, AGENTS.md files, providers, sessions
 fin -migrate                    # rename existing session files to the current filename format, backfilling repo where possible
 fin -no-project "prompt"        # skip project-specific AGENTS.md and skill directories (global-only context)

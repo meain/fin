@@ -158,6 +158,18 @@ func Run() int {
 
 	if *queue {
 		msg := strings.Join(flag.Args(), " ")
+
+		if stat, _ := os.Stdin.Stat(); stat.Mode()&os.ModeCharDevice == 0 {
+			if data, err := io.ReadAll(os.Stdin); err == nil && len(data) > 0 {
+				pipedInput := string(data)
+				if msg != "" {
+					msg = msg + "\n\n" + pipedInput
+				} else {
+					msg = pipedInput
+				}
+			}
+		}
+
 		if msg == "" {
 			fmt.Fprintf(os.Stderr, "usage: fin -q \"message\"\n")
 			return 1
