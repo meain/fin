@@ -63,6 +63,7 @@ func Run() int {
 	secondaryModel := flag.String("secondary-model", "", "model for title generation (overrides config)")
 	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
 	doctor := flag.Bool("doctor", false, "print diagnostic info: tools, models, skills, AGENTS.md files")
+	migrate := flag.Bool("migrate", false, "rename existing session files to the current filename format")
 	tag := flag.String("tag", "", "tag for this session; with -c or -sessions, filters by tag")
 	repoFlag := flag.Bool("repo", false, "with -c or -sessions, filter to sessions in the current repo")
 	noProject := flag.Bool("no-project", false, "skip project-specific AGENTS.md and skill directories")
@@ -75,7 +76,7 @@ func Run() int {
 	currentRepo := ""
 	if *repoFlag {
 		cwd, _ := os.Getwd()
-		currentRepo = filepath.Base(fsutil.RepoRoot(cwd))
+		currentRepo = fsutil.RepoName(cwd)
 	}
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
@@ -102,6 +103,10 @@ func Run() int {
 	}
 	if *noProject {
 		cfg.Settings.ProjectFile = ""
+	}
+
+	if *migrate {
+		return runMigrate()
 	}
 
 	if *doctor {
@@ -513,6 +518,26 @@ loop:
 	}
 
 	<-titleDone
+	return 0
+}
+
+// runMigrate renames existing session files to the current filename format
+// (see internal/session/filename.go), backfilling each header's Repo where
+// possible, and prints a summary. Safe to run repeatedly — files already
+// fully up to date are left untouched.
+func runMigrate() int {
+	result, err := session.Migrate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		return 1
+	}
+	fmt.Printf("renamed %d, repaired %d, %d already up to date\n", result.Renamed, result.Repaired, result.Skipped)
+	for _, e := range result.Errors {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", e)
+	}
+	if len(result.Errors) > 0 {
+		return 1
+	}
 	return 0
 }
 

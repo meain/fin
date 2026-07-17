@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,4 +20,17 @@ func RepoRoot(dir string) string {
 		}
 	}
 	return dir
+}
+
+// RepoName returns the basename of RepoRoot(dir), suitable for embedding in
+// a filename or displaying as a short repo identifier. Returns "" for
+// degenerate cases (e.g. dir is "/" or ".") where a basename would be "/"
+// or "." — neither is a meaningful repo name, and "/" in particular would
+// corrupt a filename that embeds it.
+func RepoName(dir string) string {
+	base := filepath.Base(RepoRoot(dir))
+	if base == "/" || base == "." {
+		return ""
+	}
+	return base
 }

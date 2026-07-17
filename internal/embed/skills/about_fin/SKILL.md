@@ -49,6 +49,7 @@ fin -sessions -repo                    # list sessions created in the current re
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
 fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
+fin -migrate                           # rename existing session files to the current filename format, backfilling repo where possible
 fin -no-project "prompt"               # skip project AGENTS.md and project skill dirs (global-only context)
 ```
 

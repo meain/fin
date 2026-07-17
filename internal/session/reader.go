@@ -115,6 +115,27 @@ func readHeader(path string) (*sessionHeader, error) {
 	return nil, fmt.Errorf("no header found in %s", path)
 }
 
+// readHeaderAndRest reads path and returns the parsed header plus the raw
+// bytes of everything after the header's newline, untouched. Used by Migrate
+// to rewrite just the header line (e.g. to backfill Repo) without touching
+// message encoding.
+func readHeaderAndRest(path string) (sessionHeader, []byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sessionHeader{}, nil, err
+	}
+	headerLine, rest, found := bytes.Cut(data, []byte("\n"))
+	if !found {
+		headerLine = data
+		rest = nil
+	}
+	var h sessionHeader
+	if err := json.Unmarshal(bytes.TrimSpace(headerLine), &h); err != nil {
+		return sessionHeader{}, nil, fmt.Errorf("session header: %w", err)
+	}
+	return h, rest, nil
+}
+
 // parseFiles reads and parses the given session files in parallel (8 workers).
 // Failed reads are silently skipped. Input order is preserved.
 func parseFiles(paths []string) []Session {

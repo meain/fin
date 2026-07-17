@@ -48,7 +48,7 @@ func NewWriter(id, model, name string, temp bool, tags []string) *Writer {
 		id = uuid.New().String()
 	}
 	cwd, _ := os.Getwd()
-	repo := filepath.Base(fsutil.RepoRoot(cwd))
+	repo := fsutil.RepoName(cwd)
 	filename := buildFilename(time.Now().Format("20060102-150405"), id, repo, name, temp)
 
 	return &Writer{

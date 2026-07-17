@@ -26,6 +26,7 @@ internal/
                reader.go             # readFile (tolerates truncated trailing line), parseFiles (parallel), uuidFromFilename
                store.go              # entries, LoadByID/Index/Name/Last/Chain, LoadLastWithFilter, LoadSummaries, SummariesJSON, ParseSince
                filename.go           # buildFilename/parseFilename: <timestamp>---<uuid>---<repo>---<name>---<temp>.jsonl
+               migrate.go            # Migrate: renames legacy-format session files, backfills header Repo to match filename
                match.go              # FindMatching, scoreSession, extractKeywords, stopWords
   skill/       skill.go              # Skill, ParseMD, Discover (walks up cwd, then ~), scanDir
   prompt/      prompt.go             # BuildSystem (gates base prompt by enabled tools)
@@ -146,6 +147,7 @@ fin -q message words here       # queue a message into the last running session'
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session
 fin -doctor                     # print diagnostic summary: tools, models, skills, AGENTS.md files, providers, sessions
+fin -migrate                    # rename existing session files to the current filename format, backfilling repo where possible
 fin -no-project "prompt"        # skip project-specific AGENTS.md and skill directories (global-only context)
 ```
 
