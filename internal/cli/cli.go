@@ -434,8 +434,7 @@ func Run() int {
 	}
 
 	if len(args) == 0 && pipedInput == "" && filePrompt == "" {
-		fmt.Fprintf(os.Stderr, "usage: fin [flags] \"prompt\"\n")
-		flag.PrintDefaults()
+		printUsage()
 		return 1
 	}
 

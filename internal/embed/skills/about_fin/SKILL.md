@@ -51,6 +51,7 @@ fin -s <uuid> -fork "try differently"  # fork a specific session
 fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
 fin -migrate                           # rename existing session files to the current filename format, backfilling repo where possible
 fin -no-project "prompt"               # skip project AGENTS.md and project skill dirs (global-only context)
+fin -h                                 # grouped help output (also shown when run with no prompt/stdin/-f)
 ```
 
 ## Shebang scripts

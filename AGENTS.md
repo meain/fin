@@ -151,6 +151,7 @@ fin -sessions -running          # list only sessions with a live process (FIFO h
 fin -doctor                     # print diagnostic summary: tools, models, skills, AGENTS.md files, providers, sessions
 fin -migrate                    # rename existing session files to the current filename format, backfilling repo where possible
 fin -no-project "prompt"        # skip project-specific AGENTS.md and skill directories (global-only context)
+fin -h                          # grouped help output (also shown when run with no prompt/stdin/-f)
 ```
 
 ## Config
