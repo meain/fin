@@ -24,7 +24,8 @@ internal/
   session/     session.go            # Session, sessionHeader (twin kept — append perf), TitleFromFirstMessage, LastMessageTime
                writer.go             # Writer, NewWriter, WriterForExisting, Save, fullRewrite, appendNew, ErrConflict (mtime guard)
                reader.go             # readFile (tolerates truncated trailing line), parseFiles (parallel), uuidFromFilename
-               store.go              # entries, LoadByID/Index/Name/Last/Chain, LoadSummaries, SummariesJSON, ParseSince
+               store.go              # entries, LoadByID/Index/Name/Last/Chain, LoadLastWithFilter, LoadSummaries, SummariesJSON, ParseSince
+               filename.go           # buildFilename/parseFilename: <timestamp>---<uuid>---<repo>---<name>---<temp>.jsonl
                match.go              # FindMatching, scoreSession, extractKeywords, stopWords
   skill/       skill.go              # Skill, ParseMD, Discover (walks up cwd, then ~), scanDir
   prompt/      prompt.go             # BuildSystem (gates base prompt by enabled tools)
@@ -62,7 +63,7 @@ skill  → config, fsutil
 prompt → skill, embed, config, fsutil
 tool   → types
 provider → types
-session → types, config
+session → types, config, fsutil
 agent  → types, provider, tool, approval, prompt, skill, config, embed
 export → types, session, tool, embed
 ui     → types, render, input, tool, agent      (for Debug* payload types only)
@@ -139,6 +140,8 @@ fin -c -t work "follow up"      # continue last session tagged "work"
 fin -c -t -work "follow up"     # continue last session NOT tagged "work"
 fin -sessions -t work           # list sessions tagged "work"
 fin -sessions -t -work          # list sessions NOT tagged "work"
+fin -c -repo "follow up"        # continue last session created in the current repo
+fin -sessions -repo             # list sessions created in the current repo
 fin -q message words here       # queue a message into the last running session's FIFO
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session

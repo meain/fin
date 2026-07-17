@@ -20,6 +20,7 @@ type Session struct {
 	Title           string      `json:"title"`
 	Model           string      `json:"model"`
 	Cwd             string      `json:"cwd"`
+	Repo            string      `json:"repo,omitempty"`
 	Name            string      `json:"name,omitempty"`
 	PreviousSession string      `json:"previous_session,omitempty"`
 	Temp            bool        `json:"temp,omitempty"`
@@ -36,6 +37,7 @@ type sessionHeader struct {
 	Title           string    `json:"title"`
 	Model           string    `json:"model"`
 	Cwd             string    `json:"cwd"`
+	Repo            string    `json:"repo,omitempty"`
 	Name            string    `json:"name,omitempty"`
 	PreviousSession string    `json:"previous_session,omitempty"`
 	Temp            bool      `json:"temp,omitempty"`

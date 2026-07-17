@@ -44,6 +44,8 @@ fin -c -t work "follow up"             # continue last session tagged "work"
 fin -c -t -work "follow up"            # continue last session NOT tagged "work"
 fin -sessions -t work                  # list sessions tagged "work"
 fin -sessions -t -work                 # list sessions NOT tagged "work"
+fin -c -repo "follow up"               # continue last session created in the current repo
+fin -sessions -repo                    # list sessions created in the current repo
 fin -fork "try different approach"     # fork the last session into a new one and continue from there
 fin -s <uuid> -fork "try differently"  # fork a specific session
 fin -doctor                            # print diagnostic summary: models, providers (key status), tools, skills, AGENTS.md files
@@ -100,6 +102,7 @@ Progressive disclosure: only skill names and descriptions are loaded at startup.
 - Reader tolerates a truncated trailing line (crash mid-append) so earlier messages stay readable.
 - UUID-based with prefix matching (`fin -s abc12` works). Named sessions via `-n`. Match recent sessions to the current prompt with `-match`.
 - Tag sessions with `-tag <name>` or `-t <name>`. Use `-t <name>` with `-c` or `-sessions` to filter by tag; prefix with `-` (e.g. `-t -work`) to exclude sessions with that tag.
+- Each session automatically records the repo it was started in (basename of the git/jj repo root, or cwd if neither is detected). Use `-repo` with `-c` or `-sessions` to filter to sessions created in the current repo.
 - Fork sessions with `-fork`: copies all messages into a new session with `previous_session` pointing to the origin. Forks are shown grouped under their parent in `fin -sessions` (TTY) and as a flat array with `parent_id` in JSON. Exports walk the full ancestor chain root-first.
 
 ### Export

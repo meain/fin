@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,17 +15,21 @@ import (
 	t "github.com/meain/fin/internal/types"
 )
 
-// entry is a cheap (no JSON parse) view of a session file.
+// entry is a cheap (no JSON parse) view of a session file. temp and repo are
+// read straight from the filename (see filename.go), so listing sessions
+// never needs to open a file.
 type entry struct {
 	path  string
 	name  string
 	mtime time.Time
 	temp  bool
+	repo  string
 }
 
 // entries returns all .jsonl session files in the sessions dir, sorted by
-// mtime descending. No JSON parsing — uses only dirent + stat.
-// Detects temp sessions from the _temp filename suffix.
+// mtime descending. No JSON parsing — uses only dirent + stat, plus filename
+// parsing for temp/repo. Files not in the current filename format are
+// treated as neither temp nor associated with any repo.
 func entries() ([]entry, error) {
 	dir := config.SessionPath()
 	es, err := os.ReadDir(dir)
@@ -40,17 +45,13 @@ func entries() ([]entry, error) {
 		if err != nil {
 			continue
 		}
-		// Anchor to the trailing "_temp" component (before the .jsonl
-		// extension) rather than an unanchored substring match, so a named
-		// session like "foo_temp_report" isn't misclassified as temporary
-		// just because "_temp" appears somewhere in its name.
-		base := strings.TrimSuffix(e.Name(), ".jsonl")
-		temp := strings.HasSuffix(base, "_temp")
+		f, _ := parseFilename(e.Name())
 		out = append(out, entry{
 			path:  filepath.Join(dir, e.Name()),
 			name:  e.Name(),
 			mtime: info.ModTime(),
-			temp:  temp,
+			temp:  f.temp,
+			repo:  f.repo,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].mtime.After(out[j].mtime) })
@@ -103,26 +104,29 @@ func LoadByID(id string) (*Session, error) {
 	return nil, fmt.Errorf("session %s not found", id)
 }
 
-// LoadByName loads a session by its trailing-name segment in the filename.
-// Matches both permanent ("..._<name>.jsonl") and temp ("..._<name>_temp.jsonl")
-// session files, since the temp suffix always trails the name in the filename
-// layout written by Writer.
+// LoadByName loads a session by its name field, using the filename's
+// dedicated name field (independent of the temp field, so no name/temp
+// ambiguity is possible).
 func LoadByName(name string) (*Session, error) {
 	dir := config.SessionPath()
-	matches, err := filepath.Glob(filepath.Join(dir, "*_"+name+".jsonl"))
+	es, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("session %q not found", name)
 	}
-	tempMatches, err := filepath.Glob(filepath.Join(dir, "*_"+name+"_temp.jsonl"))
-	if err != nil {
-		return nil, fmt.Errorf("session %q not found", name)
+	var matches []string
+	for _, e := range es {
+		if e.IsDir() {
+			continue
+		}
+		if f, ok := parseFilename(e.Name()); ok && f.name == name {
+			matches = append(matches, filepath.Join(dir, e.Name()))
+		}
 	}
-	matches = append(matches, tempMatches...)
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("session %q not found", name)
 	}
 	// Filenames are timestamp-prefixed, so lexicographic order is
-	// chronological; re-sort after merging the two glob results.
+	// chronological.
 	sort.Strings(matches)
 	return readFile(matches[len(matches)-1])
 }
@@ -150,10 +154,12 @@ func LoadLastTemp() (*Session, error) {
 	return nil, fmt.Errorf("no temp sessions found")
 }
 
-// LoadLastWithTag loads the most recently modified permanent session matching
-// the tag filter. A tag prefixed with "-" negates the filter (sessions that do
-// NOT have that tag). Reads only the header of each candidate file for speed.
-func LoadLastWithTag(tag string) (*Session, error) {
+// LoadLastWithFilter loads the most recently modified permanent session
+// matching both the tag and repo filters (either may be empty to skip that
+// check). A tag prefixed with "-" negates the filter (sessions that do NOT
+// have that tag). Repo is checked from the filename alone (no I/O); tag
+// requires reading the header, but only for repo-matching candidates.
+func LoadLastWithFilter(tag, repo string) (*Session, error) {
 	exclude := strings.HasPrefix(tag, "-")
 	if exclude {
 		tag = tag[1:]
@@ -163,32 +169,35 @@ func LoadLastWithTag(tag string) (*Session, error) {
 		return nil, fmt.Errorf("no sessions found")
 	}
 	for _, e := range es {
+		if repo != "" && e.repo != repo {
+			continue
+		}
+		if tag == "" {
+			return readFile(e.path)
+		}
 		h, err := readHeader(e.path)
 		if err != nil {
 			continue
 		}
-		hasTag := false
-		for _, t := range h.Tags {
-			if t == tag {
-				hasTag = true
-				break
-			}
+		if slices.Contains(h.Tags, tag) == exclude {
+			continue
 		}
-		if hasTag != exclude {
-			return readFile(e.path)
-		}
+		return readFile(e.path)
 	}
 	if exclude {
 		return nil, fmt.Errorf("no session without tag %q found", tag)
 	}
-	return nil, fmt.Errorf("no session with tag %q found", tag)
+	if tag != "" {
+		return nil, fmt.Errorf("no session with tag %q found", tag)
+	}
+	return nil, fmt.Errorf("no session in repo %q found", repo)
 }
 
 // LoadSummaries returns up to limit recent sessions (limit<=0 means no
-// limit), optionally filtered by since and/or tag. Returns the parsed sessions
-// plus the total number of candidates after all filters so callers can show
-// "showing N of M". Pure data — no I/O on stdout.
-func LoadSummaries(limit int, since time.Time, tag string) ([]Session, int, error) {
+// limit), optionally filtered by since, tag, and/or repo. Returns the parsed
+// sessions plus the total number of candidates after all filters so callers
+// can show "showing N of M". Pure data — no I/O on stdout.
+func LoadSummaries(limit int, since time.Time, tag string, repo string) ([]Session, int, error) {
 	es, err := entries()
 	if err != nil {
 		return nil, 0, err
@@ -198,6 +207,18 @@ func LoadSummaries(limit int, since time.Time, tag string) ([]Session, int, erro
 		kept := es[:0]
 		for _, e := range es {
 			if e.mtime.After(since) {
+				kept = append(kept, e)
+			}
+		}
+		es = kept
+	}
+
+	// Repo filter: checked from the filename alone (no I/O), before any
+	// parsing.
+	if repo != "" {
+		kept := es[:0]
+		for _, e := range es {
+			if e.repo == repo {
 				kept = append(kept, e)
 			}
 		}
@@ -217,8 +238,9 @@ func LoadSummaries(limit int, since time.Time, tag string) ([]Session, int, erro
 		return parseFiles(paths), total, nil
 	}
 
-	// Tag filter: parse all candidates, then filter, then limit.
-	// A leading "-" on the tag means exclude sessions that have it.
+	// Tag filter needs the header (tags aren't in the filename): parse all
+	// remaining candidates, then filter, then limit. A leading "-" on the tag
+	// means exclude sessions that have it.
 	exclude := strings.HasPrefix(tag, "-")
 	if exclude {
 		tag = tag[1:]
@@ -230,16 +252,10 @@ func LoadSummaries(limit int, since time.Time, tag string) ([]Session, int, erro
 	all := parseFiles(paths)
 	filtered := make([]Session, 0, len(all))
 	for _, s := range all {
-		hasTag := false
-		for _, st := range s.Tags {
-			if st == tag {
-				hasTag = true
-				break
-			}
+		if slices.Contains(s.Tags, tag) == exclude {
+			continue
 		}
-		if hasTag != exclude {
-			filtered = append(filtered, s)
-		}
+		filtered = append(filtered, s)
 	}
 	total := len(filtered)
 	if limit > 0 && total > limit {
@@ -256,6 +272,7 @@ type Summary struct {
 	Name         string    `json:"name,omitempty"`
 	Temp         bool      `json:"temp,omitempty"`
 	Tags         []string  `json:"tags,omitempty"`
+	Repo         string    `json:"repo,omitempty"`
 	ParentID     string    `json:"parent_id,omitempty"`
 	StartedAt    time.Time `json:"started_at"`
 	MessageCount int       `json:"message_count"`
@@ -280,6 +297,7 @@ func SummariesJSON(sessions []Session) ([]byte, error) {
 			Name:         sess.Name,
 			Temp:         sess.Temp,
 			Tags:         sess.Tags,
+			Repo:         sess.Repo,
 			ParentID:     sess.PreviousSession,
 			StartedAt:    sess.StartedAt,
 			MessageCount: msgCount,

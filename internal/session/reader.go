@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	t "github.com/meain/fin/internal/types"
@@ -51,6 +50,7 @@ func readFile(path string) (*Session, error) {
 		Title:           header.Title,
 		Model:           header.Model,
 		Cwd:             header.Cwd,
+		Repo:            header.Repo,
 		Name:            header.Name,
 		PreviousSession: header.PreviousSession,
 		Temp:            header.Temp,
@@ -147,13 +147,12 @@ func parseFiles(paths []string) []Session {
 	return filtered
 }
 
-// uuidFromFilename extracts the UUID from a session filename like
-// "YYYYMMDD-HHMMSS_<uuid>[_<name>].jsonl".
+// uuidFromFilename extracts the UUID from a session filename in the
+// "<timestamp>---<uuid>---<repo>---<name>---<temp>.jsonl" format.
 func uuidFromFilename(name string) string {
-	base := strings.TrimSuffix(name, ".jsonl")
-	parts := strings.SplitN(base, "_", 3)
-	if len(parts) < 2 {
+	f, ok := parseFilename(name)
+	if !ok {
 		return ""
 	}
-	return parts[1]
+	return f.uuid
 }

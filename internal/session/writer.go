@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meain/fin/internal/config"
+	"github.com/meain/fin/internal/fsutil"
 	t "github.com/meain/fin/internal/types"
 )
 
@@ -22,6 +23,7 @@ type Writer struct {
 	id              string
 	model           string
 	cwd             string
+	repo            string
 	name            string
 	previousSession string
 	title           string // LLM-generated title override
@@ -46,19 +48,14 @@ func NewWriter(id, model, name string, temp bool, tags []string) *Writer {
 		id = uuid.New().String()
 	}
 	cwd, _ := os.Getwd()
-	suffix := ""
-	if temp {
-		suffix = "_temp"
-	}
-	filename := fmt.Sprintf("%s_%s%s.jsonl", time.Now().Format("20060102-150405"), id, suffix)
-	if name != "" {
-		filename = fmt.Sprintf("%s_%s_%s%s.jsonl", time.Now().Format("20060102-150405"), id, name, suffix)
-	}
+	repo := filepath.Base(fsutil.RepoRoot(cwd))
+	filename := buildFilename(time.Now().Format("20060102-150405"), id, repo, name, temp)
 
 	return &Writer{
 		id:       id,
 		model:    model,
 		cwd:      cwd,
+		repo:     repo,
 		name:     name,
 		temp:     temp,
 		tags:     tags,
@@ -82,13 +79,14 @@ func WriterForExisting(sess *Session) *Writer {
 		}
 	}
 	if fp == "" {
-		fp = filepath.Join(dir, fmt.Sprintf("%s_%s.jsonl", time.Now().Format("20060102-150405"), sess.ID))
+		fp = filepath.Join(dir, buildFilename(time.Now().Format("20060102-150405"), sess.ID, sess.Repo, sess.Name, sess.Temp))
 	}
 
 	w := &Writer{
 		id:              sess.ID,
 		model:           sess.Model,
 		cwd:             sess.Cwd,
+		repo:            sess.Repo,
 		name:            sess.Name,
 		previousSession: sess.PreviousSession,
 		title:           sess.Title,
@@ -204,6 +202,7 @@ func (w *Writer) fullRewrite(messages []t.Message) error {
 		Title:           title,
 		Model:           w.model,
 		Cwd:             w.cwd,
+		Repo:            w.repo,
 		Name:            w.name,
 		PreviousSession: w.previousSession,
 		Temp:            w.temp,

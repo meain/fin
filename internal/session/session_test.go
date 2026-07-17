@@ -468,13 +468,28 @@ func TestParseSince_InvalidNumber(t *testing.T) {
 // LoadSummaries tests.
 func writeTestSession(t *testing.T, dir string, id string, age time.Duration, msgCount int) {
 	t.Helper()
+	writeTestSessionFull(t, dir, id, age, msgCount, "", nil)
+}
+
+// writeTestSessionWithRepo is like writeTestSession but also stamps the
+// session (header and filename) with the given repo and an optional tag, for
+// repo/tag filtering tests.
+func writeTestSessionWithRepo(t *testing.T, dir string, id string, age time.Duration, repo string, tags []string) {
+	t.Helper()
+	writeTestSessionFull(t, dir, id, age, 1, repo, tags)
+}
+
+// writeTestSessionFull writes a session file in the current filename format
+// (see filename.go), backdated by age, for use in store.go tests.
+func writeTestSessionFull(t *testing.T, dir string, id string, age time.Duration, msgCount int, repo string, tags []string) {
+	t.Helper()
 	now := time.Now()
 	backdated := now.Add(-age)
 	msgs := make([]t2.Message, msgCount)
 	for i := range msgs {
 		msgs[i] = t2.Message{Role: t2.RoleUser, Content: "test", Timestamp: backdated}
 	}
-	filename := backdated.Format("20060102-150405") + "_" + id + ".jsonl"
+	filename := buildFilename(backdated.Format("20060102-150405"), id, repo, "", false)
 	path := filepath.Join(dir, filename)
 
 	var buf bytes.Buffer
@@ -483,20 +498,22 @@ func writeTestSession(t *testing.T, dir string, id string, age time.Duration, ms
 		ID:        id,
 		Title:     "test session " + id,
 		Model:     "test/model",
+		Repo:      repo,
+		Tags:      tags,
 		StartedAt: backdated,
 	}); err != nil {
-		t.Fatalf("writeTestSession encode header: %v", err)
+		t.Fatalf("writeTestSessionFull encode header: %v", err)
 	}
 	for i := range msgs {
 		if err := enc.Encode(msgs[i]); err != nil {
-			t.Fatalf("writeTestSession encode msg: %v", err)
+			t.Fatalf("writeTestSessionFull encode msg: %v", err)
 		}
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
-		t.Fatalf("writeTestSession: %v", err)
+		t.Fatalf("writeTestSessionFull: %v", err)
 	}
 	if err := os.Chtimes(path, backdated, backdated); err != nil {
-		t.Fatalf("writeTestSession chtimes: %v", err)
+		t.Fatalf("writeTestSessionFull chtimes: %v", err)
 	}
 }
 
@@ -512,7 +529,7 @@ func TestLoadSummaries_AllRecent(t *testing.T) {
 
 	t.Setenv("HOME", home)
 
-	sessions, total, err := LoadSummaries(-1, time.Time{}, "")
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,10 +538,11 @@ func TestLoadSummaries_AllRecent(t *testing.T) {
 	}
 }
 
-// TestEntries_NamePrefixNotMisdetectedAsTemp guards against unanchored
-// substring matching on "_temp": a fully permanent session named e.g.
-// "foo_temp_report" must not be misclassified as temporary just because
-// "_temp" appears somewhere in its filename.
+// TestEntries_NamePrefixNotMisdetectedAsTemp guards against name/temp
+// ambiguity: a permanent session named e.g. "foo_temp_report" must not be
+// misclassified as temporary just because "_temp" appears in its name. The
+// filename format's dedicated name and temp fields make this structurally
+// impossible (see filename.go), unlike a suffix-based heuristic.
 func TestEntries_NamePrefixNotMisdetectedAsTemp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -554,10 +572,9 @@ func TestEntries_NamePrefixNotMisdetectedAsTemp(t *testing.T) {
 	}
 }
 
-// TestLoadByName_FindsNamedTempSession guards against LoadByName's glob
-// pattern ("*_<name>.jsonl") failing to match a named session that was also
-// created with -temp, whose filename carries a trailing "_temp" suffix after
-// the name ("..._<name>_temp.jsonl").
+// TestLoadByName_FindsNamedTempSession guards against LoadByName failing to
+// match a named session that was also created with -temp, since name and
+// temp are independent fields in the filename.
 func TestLoadByName_FindsNamedTempSession(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -579,6 +596,39 @@ func TestLoadByName_FindsNamedTempSession(t *testing.T) {
 	}
 }
 
+// TestEntries_NameEndingInTempNotMisdetected guards against a session whose
+// *name* literally ends in "_temp" (e.g. "-n my_temp") being misclassified as
+// a temp session when temp=false. A suffix-based heuristic on the whole
+// filename can't tell these apart; the dedicated temp field can.
+func TestEntries_NameEndingInTempNotMisdetected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	w := NewWriter("", "test/model", "my_temp", false, nil)
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "hi", Timestamp: time.Now()}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	es, err := entries()
+	if err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	if len(es) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(es))
+	}
+	if es[0].temp {
+		t.Errorf("session named %q was misclassified as temp", w.name)
+	}
+
+	sess, err := LoadByName("my_temp")
+	if err != nil {
+		t.Fatalf("LoadByName(%q) failed: %v", "my_temp", err)
+	}
+	if sess.Temp {
+		t.Errorf("expected loaded session to not be marked temp")
+	}
+}
+
 func TestLoadSummaries_SinceFilter(t *testing.T) {
 	home := t.TempDir()
 	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
@@ -592,7 +642,7 @@ func TestLoadSummaries_SinceFilter(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	since := time.Now().Add(-24 * time.Hour)
-	sessions, total, err := LoadSummaries(-1, since, "")
+	sessions, total, err := LoadSummaries(-1, since, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,5 +651,86 @@ func TestLoadSummaries_SinceFilter(t *testing.T) {
 	}
 	if len(sessions) > 0 && sessions[0].ID != "recent11-0000-0000-0000-000000000000" {
 		t.Errorf("expected recent session, got %q", sessions[0].ID)
+	}
+}
+
+func TestNewWriter_SetsRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	w := NewWriter("", "test/model", "", false, nil)
+	if w.repo == "" {
+		t.Errorf("expected NewWriter to set a non-empty repo")
+	}
+}
+
+func TestLoadSummaries_RepoFilter(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSessionWithRepo(t, sessDir, "reposesh1-0000-0000-0000-000000000000", time.Hour, "fin", nil)
+	writeTestSessionWithRepo(t, sessDir, "reposesh2-0000-0000-0000-000000000000", 2*time.Hour, "other-repo", nil)
+
+	t.Setenv("HOME", home)
+
+	sessions, total, err := LoadSummaries(-1, time.Time{}, "", "fin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || total != 1 {
+		t.Fatalf("expected 1/1, got %d/%d", len(sessions), total)
+	}
+	if sessions[0].ID != "reposesh1-0000-0000-0000-000000000000" {
+		t.Errorf("expected fin-repo session, got %q", sessions[0].ID)
+	}
+}
+
+func TestLoadLastWithFilter_Repo(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSessionWithRepo(t, sessDir, "reposesh3-0000-0000-0000-000000000000", time.Hour, "other-repo", nil)
+	writeTestSessionWithRepo(t, sessDir, "reposesh4-0000-0000-0000-000000000000", 2*time.Hour, "fin", nil)
+
+	t.Setenv("HOME", home)
+
+	sess, err := LoadLastWithFilter("", "fin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ID != "reposesh4-0000-0000-0000-000000000000" {
+		t.Errorf("expected fin-repo session, got %q", sess.ID)
+	}
+
+	if _, err := LoadLastWithFilter("", "no-such-repo"); err == nil {
+		t.Errorf("expected error for repo with no matching sessions")
+	}
+}
+
+func TestLoadLastWithFilter_TagAndRepoCombined(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSessionWithRepo(t, sessDir, "reposesh5-0000-0000-0000-000000000000", time.Hour, "fin", []string{"other"})
+	writeTestSessionWithRepo(t, sessDir, "reposesh6-0000-0000-0000-000000000000", 2*time.Hour, "fin", []string{"work"})
+	writeTestSessionWithRepo(t, sessDir, "reposesh7-0000-0000-0000-000000000000", 3*time.Hour, "other-repo", []string{"work"})
+
+	t.Setenv("HOME", home)
+
+	sess, err := LoadLastWithFilter("work", "fin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ID != "reposesh6-0000-0000-0000-000000000000" {
+		t.Errorf("expected session tagged work in fin repo, got %q", sess.ID)
 	}
 }

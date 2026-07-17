@@ -23,6 +23,7 @@ import (
 	"github.com/meain/fin/internal/approval"
 	"github.com/meain/fin/internal/config"
 	"github.com/meain/fin/internal/export"
+	"github.com/meain/fin/internal/fsutil"
 	"github.com/meain/fin/internal/jsonui"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/render"
@@ -63,9 +64,19 @@ func Run() int {
 	queue := flag.Bool("q", false, "queue a message into the running session's FIFO (uses positional args as message)")
 	doctor := flag.Bool("doctor", false, "print diagnostic info: tools, models, skills, AGENTS.md files")
 	tag := flag.String("tag", "", "tag for this session; with -c or -sessions, filters by tag")
+	repoFlag := flag.Bool("repo", false, "with -c or -sessions, filter to sessions in the current repo")
 	noProject := flag.Bool("no-project", false, "skip project-specific AGENTS.md and skill directories")
 	flag.StringVar(tag, "t", "", "tag (short)")
 	flag.Parse()
+
+	// currentRepo is the basename of the current git/jj repo root (or cwd if
+	// neither VCS is detected), matching how sessions record their own Repo
+	// at creation time. Only computed when -repo is actually used.
+	currentRepo := ""
+	if *repoFlag {
+		cwd, _ := os.Getwd()
+		currentRepo = filepath.Base(fsutil.RepoRoot(cwd))
+	}
 
 	enabledTools, err := parseToolsFlag(*toolsFlag)
 	if err != nil {
@@ -112,7 +123,7 @@ func Run() int {
 			}
 			sinceTime = t
 		}
-		printSessions(limit, sinceTime, *tag)
+		printSessions(limit, sinceTime, *tag, currentRepo)
 		return 0
 	}
 
@@ -134,8 +145,8 @@ func Run() int {
 		if *temp {
 			return session.LoadLastTemp()
 		}
-		if *tag != "" {
-			return session.LoadLastWithTag(*tag)
+		if *tag != "" || *repoFlag {
+			return session.LoadLastWithFilter(*tag, currentRepo)
 		}
 		return session.LoadLast()
 	}
@@ -525,8 +536,8 @@ func mergeTags(base, extra []string) []string {
 	return result
 }
 
-func printSessions(limit int, since time.Time, tag string) {
-	sessions, total, err := session.LoadSummaries(limit, since, tag)
+func printSessions(limit int, since time.Time, tag string, repo string) {
+	sessions, total, err := session.LoadSummaries(limit, since, tag, repo)
 	if err != nil || len(sessions) == 0 {
 		fmt.Fprintf(os.Stderr, "no sessions found\n")
 		return
