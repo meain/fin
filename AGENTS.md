@@ -143,7 +143,7 @@ fin -sessions -t work           # list sessions tagged "work"
 fin -sessions -t -work          # list sessions NOT tagged "work"
 fin -c -repo "follow up"        # continue last session created in the current repo
 fin -sessions -repo             # list sessions created in the current repo
-fin -q message words here       # queue a message into the last running session's FIFO
+fin -q message words here       # queue a message into the last running session's FIFO (injected between turns, not just at the end)
 fin -q -s <uuid> message        # queue into a specific session
 fin -q -n <name> message        # queue into a named session
 pbpaste | fin -q "message"      # queued message can include piped stdin, same as fin/fin -c

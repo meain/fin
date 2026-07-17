@@ -46,12 +46,41 @@ func (a *Agent) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if done {
+
+		injected := a.drainQueue()
+		if done && !injected {
 			return nil
 		}
 	}
 
 	return fmt.Errorf("max turns (%d) reached", maxTurns)
+}
+
+// drainQueue appends any messages currently buffered on QueueCh as user
+// messages. Non-blocking — it only picks up what has already arrived, it
+// never waits — so callers can call it between turns to inject queued
+// messages as soon as possible instead of only after the whole run ends.
+// Returns true if at least one message was injected.
+func (a *Agent) drainQueue() bool {
+	if a.QueueCh == nil {
+		return false
+	}
+
+	injected := false
+	for {
+		select {
+		case msg, ok := <-a.QueueCh:
+			if !ok {
+				return injected
+			}
+			a.ui.Info("queued message: " + msg)
+			a.messages = append(a.messages, t.Message{Role: t.RoleUser, Content: msg, Timestamp: time.Now()})
+			a.save()
+			injected = true
+		default:
+			return injected
+		}
+	}
 }
 
 // runTurn runs one iteration: stream, consume, dispatch tool calls. Returns

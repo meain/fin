@@ -31,6 +31,12 @@ type Agent struct {
 	messages []t.Message
 	Usage    t.Usage
 
+	// QueueCh, when set, is drained between turns of run() so messages
+	// queued externally (via `fin -q`) get injected into the conversation
+	// as soon as the current turn finishes, rather than only after the
+	// entire multi-turn run completes.
+	QueueCh <-chan string
+
 	// Callbacks. OnUpdate fires after every message append. OnCompact fires
 	// when the compact tool produces a summary — caller typically rotates
 	// the session writer.

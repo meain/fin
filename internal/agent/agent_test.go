@@ -370,6 +370,58 @@ func TestSubagentTool_NoNesting(t *testing.T) {
 	}
 }
 
+func TestQueuedMessage_InjectedBetweenTurns(t *testing.T) {
+	fp := &fakeProvider{streams: []provider.Stream{
+		streamWithText("first answer"),
+		streamWithText("second answer"),
+	}}
+
+	cfg := config.Default()
+	agent := newTestAgent(fp, nil, &cfg)
+
+	queueCh := make(chan string, 1)
+	queueCh <- "queued message"
+	agent.QueueCh = queueCh
+
+	err := agent.AddUserMessage(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// [system, user(go), assistant(first answer), user(queued message), assistant(second answer)]
+	msgs := agent.Messages()
+	if len(msgs) != 5 {
+		t.Fatalf("expected 5 messages, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[3].Role != tp.RoleUser || msgs[3].Content != "queued message" {
+		t.Errorf("expected injected queued message at index 3, got role=%s content=%q", msgs[3].Role, msgs[3].Content)
+	}
+	if msgs[4].Content != "second answer" {
+		t.Errorf("expected a second turn to run after injection, got %q", msgs[4].Content)
+	}
+	if fp.idx != 2 {
+		t.Errorf("expected both streams to be consumed, fp.idx=%d", fp.idx)
+	}
+}
+
+func TestQueuedMessage_NoneQueued_StopsAfterOneTurn(t *testing.T) {
+	fp := &fakeProvider{streams: []provider.Stream{
+		streamWithText("only answer"),
+	}}
+
+	cfg := config.Default()
+	agent := newTestAgent(fp, nil, &cfg)
+	agent.QueueCh = make(chan string) // open but empty
+
+	err := agent.AddUserMessage(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fp.idx != 1 {
+		t.Errorf("expected exactly one turn to run, fp.idx=%d", fp.idx)
+	}
+}
+
 func TestToolError_PropagatedCorrectly(t *testing.T) {
 	ft := &fakeTool{
 		name: "failing",

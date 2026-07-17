@@ -451,6 +451,7 @@ func Run() int {
 	}
 	defer os.Remove(fifoPath)
 	queueCh := startFIFOReader(ctx, fifoPath)
+	ag.QueueCh = queueCh
 
 	// Compose prompt: file base + positional args + piped stdin
 	prompt := filePrompt
@@ -469,30 +470,13 @@ func Run() int {
 		}
 	}
 
+	// Messages queued via `fin -q` while this call is running get injected
+	// between turns (see Agent.drainQueue) rather than only after the whole
+	// multi-turn run completes.
 	if err := ag.AddUserMessage(ctx, prompt); err != nil {
 		u.Error(err.Error())
 		u.Close()
 		return 1
-	}
-
-loop:
-	for {
-		select {
-		case msg, ok := <-queueCh:
-			if !ok {
-				break loop
-			}
-			fmt.Fprintf(os.Stderr, "\n[queued] %s\n\n", msg)
-			if err := ag.AddUserMessage(ctx, msg); err != nil {
-				u.Error(err.Error())
-				u.Close()
-				return 1
-			}
-		case <-ctx.Done():
-			break loop
-		default:
-			break loop
-		}
 	}
 
 	// Generate a descriptive session title in the background.
