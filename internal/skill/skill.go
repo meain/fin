@@ -18,12 +18,9 @@ import (
 // Skill is a discovered agent skill. Name, Description, and Dir are
 // populated on discovery; Body is loaded on activation via LoadBody.
 type Skill struct {
-	Name          string            `yaml:"name"`
-	Description   string            `yaml:"description"`
-	License       string            `yaml:"license,omitempty"`
-	Compatibility string            `yaml:"compatibility,omitempty"`
-	Metadata      map[string]string `yaml:"metadata,omitempty"`
-	AllowedTools  string            `yaml:"allowed-tools,omitempty"`
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	Compatibility string `yaml:"compatibility,omitempty"`
 
 	Dir  string
 	Body string

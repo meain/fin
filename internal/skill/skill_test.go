@@ -28,12 +28,6 @@ It has multiple paragraphs.`)
 	if skill.Description != "Greet the user warmly" {
 		t.Errorf("expected description %q, got %q", "Greet the user warmly", skill.Description)
 	}
-	if skill.License != "MIT" {
-		t.Errorf("expected license %q, got %q", "MIT", skill.License)
-	}
-	if skill.AllowedTools != "shell" {
-		t.Errorf("expected allowed-tools %q, got %q", "shell", skill.AllowedTools)
-	}
 	if !strings.Contains(skill.Body, "Hello!") {
 		t.Errorf("expected body to contain %q, got %q", "Hello!", skill.Body)
 	}
