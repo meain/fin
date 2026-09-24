@@ -477,38 +477,32 @@ func TestAnthropicRequestJSON(t *testing.T) {
 	}
 }
 
-func TestPromptCaching_ToolsGetCacheControl(t *testing.T) {
-	system := []anthSystemBlock{
-		{Type: "text", Text: "be helpful"},
+var cachingTestTools = []tp.ToolDef{
+	{Name: "read", Description: "Read a file", Parameters: map[string]any{"type": "object"}},
+	{Name: "write", Description: "Write a file", Parameters: map[string]any{"type": "object"}},
+}
+
+func TestPromptCaching_SystemGetsCacheControl(t *testing.T) {
+	body := buildAnthropicRequest(tp.CompletionRequest{
+		Messages: []tp.Message{
+			{Role: tp.RoleSystem, Content: "be helpful"},
+			{Role: tp.RoleUser, Content: "hi"},
+		},
+		Tools: cachingTestTools,
+	})
+
+	// Breakpoint on the last system block covers tools+system (render
+	// order is tools → system → messages), so tools need no marker.
+	if body.System[0].CacheControl == nil || body.System[0].CacheControl.Type != "ephemeral" {
+		t.Fatal("expected cache_control on last system block")
 	}
-	tools := []anthTool{
-		{Name: "read", Description: "Read a file", InputSchema: map[string]any{"type": "object"}},
-		{Name: "write", Description: "Write a file", InputSchema: map[string]any{"type": "object"}},
+	for _, tl := range body.Tools {
+		if tl.CacheControl != nil {
+			t.Fatalf("expected no cache_control on tool %q", tl.Name)
+		}
 	}
 
-	// Simulate what StreamCompletion does
-	ephemeral := &anthCacheControl{Type: "ephemeral"}
-	if len(tools) > 0 {
-		tools[len(tools)-1].CacheControl = ephemeral
-	} else if len(system) > 0 {
-		system[len(system)-1].CacheControl = ephemeral
-	}
-
-	// Last tool should have cache_control
-	if tools[1].CacheControl == nil || tools[1].CacheControl.Type != "ephemeral" {
-		t.Fatal("expected cache_control on last tool")
-	}
-	// First tool should not
-	if tools[0].CacheControl != nil {
-		t.Fatal("expected no cache_control on first tool")
-	}
-	// System should not (tools take priority)
-	if system[0].CacheControl != nil {
-		t.Fatal("expected no cache_control on system when tools present")
-	}
-
-	// Verify JSON serialization
-	data, err := json.Marshal(tools[1])
+	data, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
@@ -516,26 +510,26 @@ func TestPromptCaching_ToolsGetCacheControl(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
+	// Top-level automatic caching for the conversation tail.
 	cc, ok := decoded["cache_control"].(map[string]any)
 	if !ok || cc["type"] != "ephemeral" {
-		t.Fatalf("expected cache_control.type 'ephemeral' in JSON, got %v", decoded["cache_control"])
+		t.Fatalf("expected top-level cache_control.type 'ephemeral' in JSON, got %v", decoded["cache_control"])
 	}
 }
 
-func TestPromptCaching_SystemGetsCacheControlWhenNoTools(t *testing.T) {
-	system := []anthSystemBlock{
-		{Type: "text", Text: "be helpful"},
-	}
-	var tools []anthTool
+func TestPromptCaching_LastToolGetsCacheControlWhenNoSystem(t *testing.T) {
+	body := buildAnthropicRequest(tp.CompletionRequest{
+		Messages: []tp.Message{{Role: tp.RoleUser, Content: "hi"}},
+		Tools:    cachingTestTools,
+	})
 
-	ephemeral := &anthCacheControl{Type: "ephemeral"}
-	if len(tools) > 0 {
-		tools[len(tools)-1].CacheControl = ephemeral
-	} else if len(system) > 0 {
-		system[len(system)-1].CacheControl = ephemeral
+	if body.Tools[1].CacheControl == nil || body.Tools[1].CacheControl.Type != "ephemeral" {
+		t.Fatal("expected cache_control on last tool when no system")
 	}
-
-	if system[0].CacheControl == nil || system[0].CacheControl.Type != "ephemeral" {
-		t.Fatal("expected cache_control on system block when no tools")
+	if body.Tools[0].CacheControl != nil {
+		t.Fatal("expected no cache_control on first tool")
+	}
+	if body.CacheControl == nil {
+		t.Fatal("expected top-level cache_control")
 	}
 }

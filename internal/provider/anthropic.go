@@ -44,6 +44,9 @@ type anthRequest struct {
 	Messages  []anthMessage     `json:"messages"`
 	Tools     []anthTool        `json:"tools,omitempty"`
 	Stream    bool              `json:"stream"`
+	// Top-level automatic caching: the API places the breakpoint on the
+	// last cacheable block and moves it forward as the conversation grows.
+	CacheControl *anthCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthCacheControl struct {
@@ -248,26 +251,35 @@ func toolDefsToAnthropic(tools []t.ToolDef) []anthTool {
 
 // --- StreamCompletion ---
 
-func (p *anthropicProvider) StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error) {
+// buildAnthropicRequest converts a CompletionRequest into the wire body,
+// placing prompt-caching breakpoints. Render order is tools → system →
+// messages, so an explicit breakpoint on the last system block caches
+// tools+system together; the top-level automatic breakpoint caches the
+// growing conversation tail so each turn only pays for what's new.
+func buildAnthropicRequest(req t.CompletionRequest) anthRequest {
 	system, anthMsgs := messagesToAnthropic(req.Messages)
 	anthTools := toolDefsToAnthropic(req.Tools)
 
-	// Mark the last system block and last tool for prompt caching
 	ephemeral := &anthCacheControl{Type: "ephemeral"}
-	if len(anthTools) > 0 {
-		anthTools[len(anthTools)-1].CacheControl = ephemeral
-	} else if len(system) > 0 {
+	if len(system) > 0 {
 		system[len(system)-1].CacheControl = ephemeral
+	} else if len(anthTools) > 0 {
+		anthTools[len(anthTools)-1].CacheControl = ephemeral
 	}
 
-	body := anthRequest{
-		Model:     req.Model,
-		MaxTokens: anthropicMaxTokens,
-		System:    system,
-		Messages:  anthMsgs,
-		Tools:     anthTools,
-		Stream:    true,
+	return anthRequest{
+		Model:        req.Model,
+		MaxTokens:    anthropicMaxTokens,
+		System:       system,
+		Messages:     anthMsgs,
+		Tools:        anthTools,
+		Stream:       true,
+		CacheControl: ephemeral,
 	}
+}
+
+func (p *anthropicProvider) StreamCompletion(ctx context.Context, req t.CompletionRequest) (Stream, error) {
+	body := buildAnthropicRequest(req)
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
