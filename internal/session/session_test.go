@@ -778,3 +778,14 @@ func TestLoadLastWithFilter_TagAndRepoCombined(t *testing.T) {
 		t.Errorf("expected session tagged work in fin repo, got %q", sess.ID)
 	}
 }
+
+func TestParseSince_RejectsNegativeAndOverflow(t *testing.T) {
+	for _, s := range []string{"-1d", "-2w", "-3h", "999999999999w", "9999999999999d"} {
+		if _, err := ParseSince(s); err == nil {
+			t.Errorf("ParseSince(%q) should fail", s)
+		}
+	}
+	if _, err := ParseSince("0d"); err != nil {
+		t.Errorf("ParseSince(\"0d\") failed: %v", err)
+	}
+}

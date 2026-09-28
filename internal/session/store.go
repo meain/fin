@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -348,27 +349,27 @@ func LoadChain(sess *Session) []*Session {
 }
 
 // ParseSince parses a human duration string ("2d", "1w", "3h", "30m") into
-// a time.Time cutoff relative to now.
+// a time.Time cutoff relative to now. Negative durations and values too
+// large to represent are rejected.
 func ParseSince(s string) (time.Time, error) {
+	invalid := fmt.Errorf("invalid duration %q", s)
 	var d time.Duration
 	switch {
-	case strings.HasSuffix(s, "w"):
-		n, err := strconv.Atoi(strings.TrimSuffix(s, "w"))
-		if err != nil {
-			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+	case strings.HasSuffix(s, "w"), strings.HasSuffix(s, "d"):
+		unit := 24 * time.Hour
+		if strings.HasSuffix(s, "w") {
+			unit *= 7
 		}
-		d = time.Duration(n) * 7 * 24 * time.Hour
-	case strings.HasSuffix(s, "d"):
-		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-		if err != nil {
-			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+		n, err := strconv.Atoi(s[:len(s)-1])
+		if err != nil || n < 0 || int64(n) > int64(math.MaxInt64/unit) {
+			return time.Time{}, invalid
 		}
-		d = time.Duration(n) * 24 * time.Hour
+		d = time.Duration(n) * unit
 	default:
 		var err error
 		d, err = time.ParseDuration(s)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("invalid duration %q", s)
+		if err != nil || d < 0 {
+			return time.Time{}, invalid
 		}
 	}
 	return time.Now().Add(-d), nil
