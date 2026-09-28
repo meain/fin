@@ -387,13 +387,22 @@ func Run() int {
 		// Resuming an existing session: merge in any new tag if not already present.
 		sw.SetTags(mergeTags(sw.Tags(), sessionTags))
 	}
+	// titleCh carries the background-generated title to the goroutine that
+	// owns sw, so the writer is only ever touched from one goroutine.
+	titleCh := make(chan string, 1)
 	var saveWarned bool
-	ag.OnUpdate = func(msgs []t.Message) {
+	saveSession := func(msgs []t.Message) {
+		select {
+		case title := <-titleCh:
+			sw.SetTitle(title)
+		default:
+		}
 		if err := sw.Save(msgs); err != nil && !saveWarned {
 			u.Error(fmt.Sprintf("session save: %v", err))
 			saveWarned = true
 		}
 	}
+	ag.OnUpdate = saveSession
 	ag.OnCompact = func() {
 		prevID := sw.ID()
 		sw = session.NewWriter("", fullModel, "", false, nil)
@@ -492,8 +501,7 @@ func Run() int {
 				parentTitle = resumedSession.Title
 			}
 			if title, err := ag.GenerateTitle(titleCtx, parentTitle); err == nil && title != "" {
-				sw.SetTitle(title)
-				_ = sw.Save(ag.Messages())
+				titleCh <- title
 			}
 		}()
 	} else {
@@ -514,6 +522,7 @@ func Run() int {
 	}
 
 	<-titleDone
+	saveSession(ag.Messages())
 	return 0
 }
 
