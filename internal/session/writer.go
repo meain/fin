@@ -259,6 +259,7 @@ func (w *Writer) fullRewrite(messages []t.Message) error {
 
 	tmp := w.filepath + ".tmp"
 	if err := os.WriteFile(tmp, buf.Bytes(), 0644); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, w.filepath); err != nil {
