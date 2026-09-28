@@ -122,7 +122,7 @@ Progressive disclosure: only skill names and descriptions are loaded at startup.
 `git diff | fin "review this"` — stdin pipe detected automatically, content prepended to prompt.
 
 ### Tool approval system
-Per-tool configurable: auto, confirm, or deny. Shell tool supports allow/deny glob patterns. `-approve all|safe|none` overrides at runtime; `-yolo` is shorthand for `-approve all`.
+Per-tool configurable: auto, confirm, or deny. Shell tool supports allow/deny glob patterns. `deny` (per-tool or a matching shell deny pattern) refuses the call without prompting, even when the tool is `auto` or `-approve safe` is set. `-approve all|safe|none` overrides at runtime; `-yolo` is shorthand for `-approve all` and is the only mode that ignores deny.
 
 ### Tool selection
 `-tools` filters the active tool set. `all` (default) enables everything; `none` disables every tool; a comma list (`-tools read,shell`) enables only the named tools. Filter applies to subagents too. Valid names: `read, write, edit, shell, compact, use_skill, subagent`.

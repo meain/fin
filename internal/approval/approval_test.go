@@ -131,7 +131,7 @@ func TestApproval_ShellDenyTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestApproval_ShellAutoSkipsPatterns(t *testing.T) {
+func TestApproval_ShellAutoStillChecksDenyPatterns(t *testing.T) {
 	ta := Build("", map[string]config.ToolConfig{
 		"shell": {
 			Approval: "auto",
@@ -139,9 +139,11 @@ func TestApproval_ShellAutoSkipsPatterns(t *testing.T) {
 		},
 	})
 
-	// When shell is "auto", deny patterns are not checked (approval short-circuits)
-	if !ta.AutoApprove("shell", map[string]any{"command": "rm foo"}) {
-		t.Error("shell auto should approve without checking deny patterns")
+	if got := ta.Decide("shell", map[string]any{"command": "rm foo"}); got != Deny {
+		t.Errorf("shell auto with denied command = %v, want Deny", got)
+	}
+	if !ta.AutoApprove("shell", map[string]any{"command": "ls"}) {
+		t.Error("shell auto should approve non-denied commands")
 	}
 }
 
@@ -235,5 +237,32 @@ func TestApproval_CLIMerge_FlagOverridesConfig(t *testing.T) {
 
 	if ta.AutoApprove("read", nil) {
 		t.Error("-approve none should override config auto_approve=all")
+	}
+}
+
+func TestApproval_DenyWinsOverAutoApproval(t *testing.T) {
+	tools := map[string]config.ToolConfig{
+		"write": {Approval: "deny"},
+		"shell": {Approval: "auto", Deny: []string{"rm *"}},
+	}
+	for _, mode := range []string{"", "safe", "none"} {
+		ta := Build(mode, tools)
+		if got := ta.Decide("write", nil); got != Deny {
+			t.Errorf("mode %q: write with approval=deny = %v, want Deny", mode, got)
+		}
+		if got := ta.Decide("shell", map[string]any{"command": "rm foo"}); got != Deny {
+			t.Errorf("mode %q: shell matching deny pattern = %v, want Deny", mode, got)
+		}
+		if got := ta.ForSubagent().Decide("write", nil); got != Deny {
+			t.Errorf("mode %q: subagent write = %v, want Deny", mode, got)
+		}
+	}
+
+	ta := Build("", tools)
+	if got := ta.Decide("shell", map[string]any{"command": "ls"}); got != Allow {
+		t.Errorf("shell auto with non-denied command = %v, want Allow", got)
+	}
+	if got := ta.Decide("edit", nil); got != Ask {
+		t.Errorf("unconfigured tool = %v, want Ask", got)
 	}
 }
