@@ -14,7 +14,8 @@ import (
 // readFile parses a JSONL session file line by line. Tolerant of a corrupt
 // trailing line — if the very last record fails to decode it is dropped
 // silently, since a crash mid-append can truncate the final line. Earlier
-// parse errors are fatal.
+// parse errors are fatal, as is a missing header or header ID (an empty or
+// blank file is not a session).
 func readFile(path string) (*Session, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -42,7 +43,10 @@ func readFile(path string) (*Session, error) {
 		return nil, err
 	}
 	if !haveHeader {
-		return &Session{}, nil
+		return nil, fmt.Errorf("session header: missing")
+	}
+	if header.ID == "" {
+		return nil, fmt.Errorf("session header: missing id")
 	}
 
 	sess := &Session{

@@ -73,20 +73,18 @@ func NewWriter(id, model, name string, temp bool, tags []string) *Writer {
 // append new tail messages.
 func WriterForExisting(sess *Session) *Writer {
 	dir := config.SessionPath()
-	entries, _ := os.ReadDir(dir)
-	var fp string
-	for _, e := range entries {
-		if !e.IsDir() && strings.Contains(e.Name(), sess.ID) {
-			fp = filepath.Join(dir, e.Name())
-			break
-		}
+	id := sess.ID
+	if id == "" {
+		// Never match an arbitrary file on an empty ID; start a fresh one.
+		id = uuid.New().String()
 	}
+	fp := findSessionFile(dir, id)
 	if fp == "" {
-		fp = filepath.Join(dir, buildFilename(time.Now().Format("20060102-150405"), sess.ID, sess.Repo, sess.Name, sess.Temp))
+		fp = filepath.Join(dir, buildFilename(time.Now().Format("20060102-150405"), id, sess.Repo, sess.Name, sess.Temp))
 	}
 
 	w := &Writer{
-		id:              sess.ID,
+		id:              id,
 		model:           sess.Model,
 		cwd:             sess.Cwd,
 		repo:            sess.Repo,
@@ -103,6 +101,29 @@ func WriterForExisting(sess *Session) *Writer {
 		w.lastSeenMtime = info.ModTime()
 	}
 	return w
+}
+
+// findSessionFile returns the path of the .jsonl session file for id, or ""
+// when none exists. Current-format filenames must match the UUID field
+// exactly; legacy filenames fall back to a substring match.
+func findSessionFile(dir, id string) string {
+	entries, _ := os.ReadDir(dir)
+	legacy := ""
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		if f, ok := parseFilename(e.Name()); ok {
+			if f.uuid == id {
+				return filepath.Join(dir, e.Name())
+			}
+			continue
+		}
+		if legacy == "" && strings.Contains(e.Name(), id) {
+			legacy = filepath.Join(dir, e.Name())
+		}
+	}
+	return legacy
 }
 
 // ID returns the writer's session ID.
