@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -16,6 +17,10 @@ import (
 )
 
 const defaultShellTimeout = 30 // seconds
+
+// pipeDrainGrace is how long to keep reading output after sh exits, before
+// giving up on background children that still hold stdout/stderr open.
+const pipeDrainGrace = 500 * time.Millisecond
 
 // ShellTool executes shell commands.
 type ShellTool struct {
@@ -78,18 +83,31 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 
 	// Use plain exec.Command so we control shutdown sequencing ourselves.
 	// exec.CommandContext would send SIGKILL immediately on cancellation.
+	// Setpgid puts sh and everything it spawns in its own process group so
+	// a timeout signals the whole tree, not just sh.
 	cmd := exec.Command("sh", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdoutPipe, err := cmd.StdoutPipe()
+	// Plain os.Pipes (rather than StdoutPipe) let cmd.Wait return as soon
+	// as sh exits, even when a background child still holds the pipes.
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return t.ToolResult{}, fmt.Errorf("stdout pipe: %w", err)
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	defer stdoutR.Close()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
+		stdoutW.Close()
 		return t.ToolResult{}, fmt.Errorf("stderr pipe: %w", err)
 	}
+	defer stderrR.Close()
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	stdoutW.Close()
+	stderrW.Close()
+	if err != nil {
 		return t.ToolResult{}, fmt.Errorf("start command: %w", err)
 	}
 
@@ -102,12 +120,11 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stdoutPipe)
+		scanner := bufio.NewScanner(stdoutR)
 		// bufio.Scanner's default max token size is 64KB; a single line longer
 		// than that (e.g. minified/base64 output with no newline) would make
 		// Scan() fail with ErrTooLong and stop reading, leaving the pipe
-		// undrained. Since cmd.Wait() requires all pipe reads to complete, the
-		// child would then block on write() until the shell timeout kills it.
+		// undrained so the child blocks on write() until the timeout.
 		// Raise the cap generously so that only pathological output hits it.
 		scanner.Buffer(make([]byte, 64<<10), 10<<20) // up to 10 MiB per line
 		for scanner.Scan() {
@@ -125,28 +142,48 @@ func (st *ShellTool) Run(ctx context.Context, args map[string]any) (t.ToolResult
 	}()
 	go func() {
 		defer wg.Done()
-		io.Copy(&stderrBuf, stderrPipe)
+		io.Copy(&stderrBuf, stderrR)
 	}()
 
 	// Watch for context cancellation and shut down gracefully:
-	// SIGTERM first, then SIGKILL after 2s if still running.
+	// SIGTERM to the process group first, then SIGKILL after 2s.
+	pgid := cmd.Process.Pid
 	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		select {
 		case <-ctx.Done():
-			cmd.Process.Signal(syscall.SIGTERM)
+			// done is closed before the deferred cancel runs, so this
+			// skips the normal-return case and leaves background jobs be.
+			select {
+			case <-done:
+				return
+			default:
+			}
+			syscall.Kill(-pgid, syscall.SIGTERM)
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
-				cmd.Process.Kill()
+				syscall.Kill(-pgid, syscall.SIGKILL)
 			}
 		case <-done:
 		}
 	}()
 
-	wg.Wait()
 	err = cmd.Wait()
-	close(done)
+
+	// sh has exited. Give the readers a moment to drain what's already been
+	// written, then stop waiting on background processes that still hold
+	// the pipes open (e.g. "server &").
+	readersDone := make(chan struct{})
+	go func() { wg.Wait(); close(readersDone) }()
+	select {
+	case <-readersDone:
+	case <-time.After(pipeDrainGrace):
+		stdoutR.Close()
+		stderrR.Close()
+		<-readersDone
+	}
 
 	var result string
 	if stdout.Len() > 0 {
