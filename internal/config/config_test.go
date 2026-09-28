@@ -182,3 +182,36 @@ func TestLoad_DefaultCreation(t *testing.T) {
 		t.Error("expected config file to be created")
 	}
 }
+
+func TestLoad_PartialMapEntriesKeepDefaults(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+[providers.openai]
+api_key_env = "MY_OPENAI_KEY"
+
+[tools.read]
+max_output_bytes = 1000
+
+[tools.shell]
+approval = "auto"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if got := cfg.Providers["openai"]; got.BaseURL != "https://api.openai.com" || got.APIKeyEnv != "MY_OPENAI_KEY" {
+		t.Errorf("openai provider = %+v, want default base_url with overridden api_key_env", got)
+	}
+	if got := cfg.Tools["read"]; got.Approval != "auto" || got.MaxOutputBytes != 1000 {
+		t.Errorf("read tool = %+v, want approval=auto (default) and max_output_bytes=1000", got)
+	}
+	if got := cfg.Tools["shell"].Approval; got != "auto" {
+		t.Errorf("shell approval = %q, want auto", got)
+	}
+}
