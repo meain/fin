@@ -262,7 +262,9 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 		case r.err != nil:
 			errMsg := errorWithContext(item.tool, item.tc.Name, item.args, r.err)
 			if r.result.Content != "" {
-				msg.Content = r.result.Content + "\n" + errMsg
+				// Partial output alongside an error (e.g. a shell timeout)
+				// is subject to the same size limit as a successful result.
+				msg.Content = a.maybeSpillOutput(item.tc.Name, item.tc.ID, r.result.Content) + "\n" + errMsg
 			} else {
 				msg.Content = errMsg
 			}

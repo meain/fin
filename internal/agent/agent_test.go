@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -453,5 +457,39 @@ func TestToolError_PropagatedCorrectly(t *testing.T) {
 	want := "Error (failing): " + io.ErrUnexpectedEOF.Error()
 	if toolMsg.Content != want {
 		t.Errorf("tool error content=%q, want %q", toolMsg.Content, want)
+	}
+}
+
+func TestToolErrorWithOutput_IsTruncated(t *testing.T) {
+	ft := &fakeTool{
+		name:   "failing",
+		result: tp.ToolResult{Content: strings.Repeat("x", 100000)},
+		err:    errors.New("command timed out"),
+	}
+
+	fp := &fakeProvider{streams: []provider.Stream{
+		streamWithToolCalls(
+			tp.ToolCallDelta{Index: 0, ID: "c1", Name: "failing", Arguments: "{}"},
+		),
+		streamWithText("handled"),
+	}}
+
+	cfg := config.Default()
+	cfg.Tools["failing"] = config.ToolConfig{Approval: "auto", MaxOutputBytes: 1000}
+
+	agent := newTestAgent(fp, []tool.Tool{ft}, &cfg)
+	agent.sessionID = "trunc-test"
+	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "fin", "trunc-test")) })
+
+	if err := agent.AddUserMessage(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	toolMsg := agent.Messages()[3]
+	if len(toolMsg.Content) > 2000 {
+		t.Errorf("tool error content is %d bytes, want it truncated near 1000", len(toolMsg.Content))
+	}
+	if !strings.HasSuffix(toolMsg.Content, "Error (failing): command timed out") {
+		t.Errorf("tool error content should end with the error, got tail %q", toolMsg.Content[len(toolMsg.Content)-60:])
 	}
 }
