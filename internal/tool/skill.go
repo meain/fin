@@ -136,19 +136,20 @@ func LoadSkillFile(dir, relPath string) (string, error) {
 }
 
 // extractSkillBody extracts the markdown body after YAML frontmatter.
+// CRLF line endings are accepted, and the closing "---" may end the file.
 func extractSkillBody(data []byte) (string, error) {
-	content := string(data)
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return "", fmt.Errorf("no YAML frontmatter found")
 	}
 
 	// Find the closing ---
 	rest := content[4:]
-	idx := strings.Index(rest, "\n---\n")
-	if idx < 0 {
-		return "", fmt.Errorf("no YAML frontmatter found")
+	if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
+		return strings.TrimSpace(rest[idx+5:]), nil
 	}
-
-	body := strings.TrimSpace(rest[idx+4:])
-	return body, nil
+	if strings.HasSuffix(rest, "\n---") {
+		return "", nil
+	}
+	return "", fmt.Errorf("no YAML frontmatter found")
 }

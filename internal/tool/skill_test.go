@@ -95,3 +95,17 @@ func TestSkillTool_NotFound(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestExtractSkillBody_CRLFAndNoTrailingNewline(t *testing.T) {
+	body, err := extractSkillBody([]byte("---\r\nname: s\r\ndescription: d\r\n---\r\nline one\r\nline two\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "line one\nline two" {
+		t.Errorf("body = %q", body)
+	}
+	body, err = extractSkillBody([]byte("---\nname: s\ndescription: d\n---"))
+	if err != nil || body != "" {
+		t.Errorf("no-body skill: body=%q err=%v", body, err)
+	}
+}

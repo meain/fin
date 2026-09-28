@@ -4,6 +4,7 @@
 package skill
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,10 +27,14 @@ type Skill struct {
 	Body string
 }
 
-var frontmatterRe = regexp.MustCompile(`(?s)\A---\n(.+?)\n---\n(.*)`)
+// frontmatterRe matches a leading "---" block. The closing "---" may be
+// followed by a newline or end the file (a skill with no body).
+var frontmatterRe = regexp.MustCompile(`(?s)\A---\n(.+?)\n---(?:\n(.*)|\z)`)
 
-// ParseMD parses a SKILL.md file's bytes into a Skill.
+// ParseMD parses a SKILL.md file's bytes into a Skill. CRLF line endings
+// are accepted.
 func ParseMD(data []byte) (*Skill, error) {
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	matches := frontmatterRe.FindSubmatch(data)
 	if matches == nil {
 		return nil, fmt.Errorf("no YAML frontmatter found")

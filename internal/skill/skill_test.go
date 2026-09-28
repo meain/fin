@@ -189,3 +189,20 @@ func TestScanSkillsDir_NonexistentDir(t *testing.T) {
 		t.Errorf("expected nil for nonexistent dir, got %v", skills)
 	}
 }
+
+func TestParseMD_CRLFAndNoTrailingNewline(t *testing.T) {
+	cases := map[string]string{
+		"crlf":            "---\r\nname: s\r\ndescription: d\r\n---\r\nbody here\r\n",
+		"no body, no EOL": "---\nname: s\ndescription: d\n---",
+	}
+	for label, src := range cases {
+		s, err := ParseMD([]byte(src))
+		if err != nil {
+			t.Errorf("%s: ParseMD failed: %v", label, err)
+			continue
+		}
+		if s.Name != "s" || s.Description != "d" {
+			t.Errorf("%s: got name=%q description=%q", label, s.Name, s.Description)
+		}
+	}
+}
