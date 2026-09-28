@@ -136,15 +136,6 @@ type anthErrorEvent struct {
 
 // --- Conversion: Message -> anthMessage ---
 
-// isToolErrorContent reports whether a tool-result message's content
-// represents a failed tool call, so the wire request can set is_error and
-// let the model recognize/adapt to failures. The only place that formats a
-// tool failure (agent.errorWithContext) produces "Error (<context>): ...",
-// never a bare "Error: " prefix, so match that actual format.
-func isToolErrorContent(content string) bool {
-	return strings.HasPrefix(content, "Error (")
-}
-
 func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs []anthMessage) {
 	for _, m := range msgs {
 		switch m.Role {
@@ -211,14 +202,14 @@ func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs [
 					Type:      "tool_result",
 					ToolUseID: m.ToolCallID,
 					Content:   contentBlocks,
-					IsError:   isToolErrorContent(m.Content),
+					IsError:   m.IsError,
 				}
 			} else {
 				block = anthContentBlock{
 					Type:      "tool_result",
 					ToolUseID: m.ToolCallID,
 					Content:   &m.Content,
-					IsError:   isToolErrorContent(m.Content),
+					IsError:   m.IsError,
 				}
 			}
 			// Merge consecutive tool results into one user message

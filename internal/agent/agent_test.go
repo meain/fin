@@ -486,6 +486,9 @@ func TestToolErrorWithOutput_IsTruncated(t *testing.T) {
 	}
 
 	toolMsg := agent.Messages()[3]
+	if !toolMsg.IsError {
+		t.Error("tool message with output and error should have IsError set")
+	}
 	if len(toolMsg.Content) > 2000 {
 		t.Errorf("tool error content is %d bytes, want it truncated near 1000", len(toolMsg.Content))
 	}

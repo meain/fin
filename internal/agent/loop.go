@@ -250,6 +250,7 @@ func (a *Agent) fixDanglingToolCalls() {
 					Role:       t.RoleTool,
 					ToolCallID: tc.ID,
 					Content:    "Cancelled by user",
+					IsError:    true,
 					Timestamp:  time.Now(),
 				})
 			}
@@ -271,7 +272,9 @@ func (a *Agent) appendToolResults(items []approvedTool, results []toolExecResult
 		switch {
 		case item.err != nil:
 			msg.Content = errorWithContext(item.tool, item.tc.Name, item.args, item.err)
+			msg.IsError = true
 		case r.err != nil:
+			msg.IsError = true
 			errMsg := errorWithContext(item.tool, item.tc.Name, item.args, r.err)
 			if r.result.Content != "" {
 				// Partial output alongside an error (e.g. a shell timeout)
