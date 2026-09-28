@@ -233,11 +233,19 @@ func readFile(path string, args map[string]any) (string, error) {
 		limit = int(v)
 	}
 
+	if offset < 0 {
+		return "", fmt.Errorf("offset must be >= 0, got %d", offset)
+	}
+	if limit < 0 {
+		return "", fmt.Errorf("limit must be >= 0, got %d", limit)
+	}
 	if offset > len(lines) {
 		offset = len(lines)
 	}
-	end := offset + limit
-	end = min(end, len(lines))
+	end := min(offset+limit, len(lines))
+	if end < offset { // offset+limit overflowed
+		end = len(lines)
+	}
 
 	var b strings.Builder
 	for i := offset; i < end; i++ {

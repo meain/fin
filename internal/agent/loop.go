@@ -177,13 +177,25 @@ func (a *Agent) runToolsParallel(ctx context.Context, items []approvedTool) []to
 					a.ui.ToolOutput(i, line, total)
 				}}
 			}
-			res, err := tl.Run(ctx, args)
+			res, err := runToolSafely(ctx, tl, args)
 			results[i] = toolExecResult{result: res, err: err}
 			a.ui.ToolDone(i, name, args, res, err)
 		}(i, item.tool, item.tc.Name, item.args)
 	}
 	wg.Wait()
 	return results
+}
+
+// runToolSafely runs a tool, turning a panic into an error result so one
+// bad tool call (e.g. malformed arguments hitting an unchecked index) can't
+// crash the whole process.
+func runToolSafely(ctx context.Context, tl tool.Tool, args map[string]any) (res t.ToolResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			res, err = t.ToolResult{}, fmt.Errorf("tool panicked: %v", r)
+		}
+	}()
+	return tl.Run(ctx, args)
 }
 
 // detectCompactSummary returns the first compact-tool summary string from
