@@ -329,7 +329,10 @@ func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (ms
 	var contentBuf strings.Builder
 	var msgUsage t.Usage
 
-	toolCalls := map[int]*t.ToolCall{}
+	// Tool calls in first-seen order. byIndex maps a delta's Index to the
+	// call currently being assembled for it.
+	var toolCalls []*t.ToolCall
+	byIndex := map[int]*t.ToolCall{}
 
 	for {
 		delta, err := stream.Recv()
@@ -363,10 +366,14 @@ func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (ms
 		}
 
 		for _, tcd := range delta.ToolCalls {
-			tc, exists := toolCalls[tcd.Index]
-			if !exists {
+			tc, exists := byIndex[tcd.Index]
+			// Some OpenAI-compatible servers omit "index" (decoded as 0)
+			// and send each call whole with its own ID; a new ID at an
+			// index already in use starts a new call instead of merging.
+			if !exists || (tcd.ID != "" && tc.ID != "" && tcd.ID != tc.ID) {
 				tc = &t.ToolCall{ID: tcd.ID, Name: tcd.Name}
-				toolCalls[tcd.Index] = tc
+				byIndex[tcd.Index] = tc
+				toolCalls = append(toolCalls, tc)
 			}
 			if tcd.ID != "" {
 				tc.ID = tcd.ID
@@ -384,18 +391,8 @@ func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (ms
 		msg.Usage = &msgUsage
 	}
 
-	if len(toolCalls) > 0 {
-		maxIdx := 0
-		for idx := range toolCalls {
-			if idx > maxIdx {
-				maxIdx = idx
-			}
-		}
-		for i := 0; i <= maxIdx; i++ {
-			if tc, ok := toolCalls[i]; ok {
-				msg.ToolCalls = append(msg.ToolCalls, *tc)
-			}
-		}
+	for _, tc := range toolCalls {
+		msg.ToolCalls = append(msg.ToolCalls, *tc)
 	}
 
 	return msg, ttft, started, nil

@@ -524,3 +524,41 @@ func TestToolPanic_BecomesErrorResult(t *testing.T) {
 		t.Errorf("tool message = %q, want a panic error", got)
 	}
 }
+
+func TestConsumeStream_MissingIndexDoesNotMergeCalls(t *testing.T) {
+	// Servers that omit "index" send every call at Index 0, each complete
+	// with its own ID.
+	stream := &fakeStream{deltas: []tp.StreamDelta{
+		{ToolCalls: []tp.ToolCallDelta{{Index: 0, ID: "c1", Name: "read", Arguments: `{"path":"a"}`}}},
+		{ToolCalls: []tp.ToolCallDelta{{Index: 0, ID: "c2", Name: "read", Arguments: `{"path":"b"}`}}},
+	}}
+	agent := newTestAgent(&fakeProvider{}, nil, nil)
+	msg, _, _, err := agent.consumeStream(stream, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 2 {
+		t.Fatalf("got %d tool calls, want 2: %+v", len(msg.ToolCalls), msg.ToolCalls)
+	}
+	if msg.ToolCalls[0].ID != "c1" || msg.ToolCalls[0].Arguments != `{"path":"a"}` ||
+		msg.ToolCalls[1].ID != "c2" || msg.ToolCalls[1].Arguments != `{"path":"b"}` {
+		t.Errorf("tool calls = %+v", msg.ToolCalls)
+	}
+}
+
+func TestConsumeStream_FragmentsAssembleByIndex(t *testing.T) {
+	stream := &fakeStream{deltas: []tp.StreamDelta{
+		{ToolCalls: []tp.ToolCallDelta{{Index: 0, ID: "c1", Name: "read"}, {Index: 1, ID: "c2", Name: "shell"}}},
+		{ToolCalls: []tp.ToolCallDelta{{Index: 1, Arguments: `{"command":`}}},
+		{ToolCalls: []tp.ToolCallDelta{{Index: 0, Arguments: `{"path":"a"}`}}},
+		{ToolCalls: []tp.ToolCallDelta{{Index: 1, Arguments: `"ls"}`}}},
+	}}
+	agent := newTestAgent(&fakeProvider{}, nil, nil)
+	msg, _, _, err := agent.consumeStream(stream, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 2 || msg.ToolCalls[0].Arguments != `{"path":"a"}` || msg.ToolCalls[1].Arguments != `{"command":"ls"}` {
+		t.Errorf("tool calls = %+v", msg.ToolCalls)
+	}
+}
