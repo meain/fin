@@ -3,9 +3,13 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
+	"syscall"
 
 	t "github.com/meain/fin/internal/types"
 )
@@ -91,10 +95,54 @@ func (e *APIError) extractMessage() string {
 // Retryable returns true if the error is worth retrying.
 func (e *APIError) Retryable() bool {
 	switch e.StatusCode {
-	case 429, 500, 502, 503, 529:
+	case 429, 500, 502, 503, 504, 529:
 		return true
 	}
 	return false
+}
+
+// StreamError is an error event received after a stream has started (e.g.
+// Anthropic's SSE "error" event with type "overloaded_error").
+type StreamError struct {
+	Provider string
+	Type     string
+	Message  string
+}
+
+func (e *StreamError) Error() string {
+	return fmt.Sprintf("%s error: %s: %s", e.Provider, e.Type, e.Message)
+}
+
+// Retryable returns true for transient server-side error types.
+func (e *StreamError) Retryable() bool {
+	switch e.Type {
+	case "overloaded_error", "api_error", "rate_limit_error":
+		return true
+	}
+	return false
+}
+
+// IsRetryable reports whether err is a transient failure worth retrying:
+// a retryable API status or stream error event, or a network-level error
+// (connection reset, dropped connection, timeout). Context cancellation is
+// never retryable.
+func IsRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Retryable()
+	}
+	var streamErr *StreamError
+	if errors.As(err, &streamErr) {
+		return streamErr.Retryable()
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
 
 type headerTransport struct {

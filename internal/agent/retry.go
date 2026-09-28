@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"math"
 	mathrand "math/rand/v2"
 	"time"
@@ -12,28 +12,29 @@ import (
 )
 
 const (
-	maxRetries     = 3
-	baseRetryDelay = 1 * time.Second
-	maxRetryDelay  = 30 * time.Second
+	maxRetries    = 3
+	maxRetryDelay = 30 * time.Second
 )
 
-// streamWithRetry calls StreamCompletion with exponential backoff + jitter
-// on retryable errors (429, 5xx, transient network). Non-retryable errors
-// short-circuit immediately.
-func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (provider.Stream, error) {
+// baseRetryDelay is a var so tests can shorten it.
+var baseRetryDelay = 1 * time.Second
+
+// streamWithRetry opens a completion stream and consumes it into one
+// assistant message, retrying with exponential backoff + jitter on
+// transient failures (429, 5xx, network errors, overloaded/api_error events
+// mid-stream). A failure after text or tool-call deltas have reached the UI
+// is not retried, since the partial output can't be taken back.
+func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (t.Message, time.Duration, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		stream, err := a.provider.StreamCompletion(ctx, req)
+		msg, ttft, started, err := a.streamOnce(ctx, req)
 		if err == nil {
-			return stream, nil
+			return msg, ttft, nil
 		}
-
 		lastErr = err
 
-		var apiErr *provider.APIError
-		retryable := errors.As(err, &apiErr) && apiErr.Retryable()
-		if !retryable || attempt == maxRetries {
-			return nil, err
+		if started || !provider.IsRetryable(err) || attempt == maxRetries || ctx.Err() != nil {
+			return t.Message{}, 0, err
 		}
 
 		delay := retryDelay(attempt)
@@ -41,11 +42,26 @@ func (a *Agent) streamWithRetry(ctx context.Context, req t.CompletionRequest) (p
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return t.Message{}, 0, ctx.Err()
 		case <-time.After(delay):
 		}
 	}
-	return nil, lastErr
+	return t.Message{}, 0, lastErr
+}
+
+// streamOnce makes a single completion attempt. started reports whether
+// any content or tool-call delta was received before a failure.
+func (a *Agent) streamOnce(ctx context.Context, req t.CompletionRequest) (msg t.Message, ttft time.Duration, started bool, err error) {
+	stream, err := a.provider.StreamCompletion(ctx, req)
+	if err != nil {
+		return t.Message{}, 0, false, err
+	}
+	defer stream.Close()
+	msg, ttft, started, err = a.consumeStream(stream, time.Now())
+	if err != nil {
+		return msg, ttft, started, fmt.Errorf("stream error: %w", err)
+	}
+	return msg, ttft, started, nil
 }
 
 // retryDelay returns the backoff for the given attempt. Exponential with
