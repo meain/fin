@@ -5,6 +5,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -198,7 +200,15 @@ func Run() int {
 		_ = syscall.SetNonblock(fd, false)
 		wf := os.NewFile(uintptr(fd), fifoPath)
 		defer wf.Close()
-		fmt.Fprintln(wf, msg)
+		// Messages are framed as one JSON string per line so multi-line
+		// messages (e.g. piped stdin) arrive as a single message. The
+		// exclusive lock keeps concurrent senders' writes from interleaving
+		// when a message exceeds PIPE_BUF.
+		_ = syscall.Flock(fd, syscall.LOCK_EX)
+		if _, err := wf.Write(encodeQueueMessage(msg)); err != nil {
+			fmt.Fprintf(os.Stderr, "queue: write: %v\n", err)
+			return 1
+		}
 		return 0
 	}
 
@@ -459,7 +469,7 @@ func Run() int {
 		return 1
 	}
 	defer os.Remove(fifoPath)
-	queueCh := startFIFOReader(ctx, fifoPath)
+	queueCh, stopQueue := startFIFOReader(ctx, fifoPath)
 	ag.QueueCh = queueCh
 
 	// Compose prompt: file base + positional args + piped stdin
@@ -482,8 +492,30 @@ func Run() int {
 	// Messages queued via `fin -q` while this call is running get injected
 	// between turns (see Agent.drainQueue) rather than only after the whole
 	// multi-turn run completes.
-	if err := ag.AddUserMessage(ctx, prompt); err != nil {
+	err = ag.AddUserMessage(ctx, prompt)
+
+	// Stop accepting queued messages, then run any that arrived after the
+	// agent's last between-turn drain, so `fin -q` never reports success for
+	// a message that is silently dropped.
+	os.Remove(fifoPath)
+	stopQueue()
+	for err == nil {
+		msg, ok := <-queueCh
+		if !ok {
+			break
+		}
+		u.Info("queued message: " + msg)
+		err = ag.AddUserMessage(ctx, msg)
+	}
+	if err != nil {
+		dropped := 0
+		for range queueCh {
+			dropped++
+		}
 		u.Error(err.Error())
+		if dropped > 0 {
+			u.Error(fmt.Sprintf("dropped %d queued message(s)", dropped))
+		}
 		u.Close()
 		return 1
 	}
@@ -812,25 +844,71 @@ func isSessionRunning(id string) bool {
 	return true
 }
 
+// fifoEndMarker is written by the reader's own stop func to mark the end of
+// the queue. It can't collide with a framed message (those are JSON strings)
+// and a NUL byte won't appear in a plain-text line.
+const fifoEndMarker = "\x00end\n"
+
+// encodeQueueMessage frames a queued message for the FIFO: a JSON string
+// followed by a newline, so embedded newlines survive the line protocol.
+func encodeQueueMessage(msg string) []byte {
+	b, _ := json.Marshal(msg)
+	return append(b, '\n')
+}
+
+// decodeQueueMessage parses one FIFO line. Lines that aren't a JSON string
+// (e.g. `echo hi > fifo`) are taken verbatim.
+func decodeQueueMessage(line string) string {
+	line = strings.TrimSpace(line)
+	var msg string
+	if strings.HasPrefix(line, `"`) && json.Unmarshal([]byte(line), &msg) == nil {
+		return strings.TrimSpace(msg)
+	}
+	return line
+}
+
 // startFIFOReader opens the FIFO at path and returns a channel that receives
-// one message per line. It holds the FIFO open across multiple external
-// write+close cycles (O_RDWR prevents EOF between writers). The goroutine
-// exits and the channel is closed when ctx is cancelled.
-func startFIFOReader(ctx context.Context, path string) chan string {
+// one message per line (see encodeQueueMessage). It holds the FIFO open
+// across multiple external write+close cycles (O_RDWR prevents EOF between
+// writers). Lines have no length limit. The returned stop func writes an
+// end marker into the FIFO; everything written before it is still
+// delivered, then the channel is closed. Cancelling ctx closes the FIFO
+// immediately.
+func startFIFOReader(ctx context.Context, path string) (chan string, func()) {
 	ch := make(chan string, 64)
+	// O_RDWR opens immediately (no blocking) and acts as both the read
+	// end and a keep-alive write reference, preventing EOF between writers.
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		close(ch)
+		return ch, func() {}
+	}
+	var closeOnce, stopOnce sync.Once
+	closeFIFO := func() { closeOnce.Do(func() { f.Close() }) }
+	stop := func() {
+		// Written from a goroutine: if the channel and pipe buffer are both
+		// full, the write only completes once the caller drains the channel.
+		stopOnce.Do(func() {
+			go func() {
+				if _, err := f.Write([]byte(fifoEndMarker)); err != nil {
+					closeFIFO()
+				}
+			}()
+		})
+	}
+	go func() { <-ctx.Done(); closeFIFO() }()
+
 	go func() {
 		defer close(ch)
-		// O_RDWR opens immediately (no blocking) and acts as both the read
-		// end and a keep-alive write reference, preventing EOF between writers.
-		f, err := os.OpenFile(path, os.O_RDWR, 0)
-		if err != nil {
-			return
-		}
-		go func() { <-ctx.Done(); f.Close() }()
-
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			msg := strings.TrimSpace(sc.Text())
+		defer closeFIFO()
+		r := bufio.NewReader(f)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil || line == fifoEndMarker {
+				// A partial trailing line (writer interrupted) is dropped.
+				return
+			}
+			msg := decodeQueueMessage(line)
 			if msg == "" {
 				continue
 			}
@@ -841,7 +919,7 @@ func startFIFOReader(ctx context.Context, path string) chan string {
 			}
 		}
 	}()
-	return ch
+	return ch, stop
 }
 
 // parseToolsFlag interprets the -tools flag value.
