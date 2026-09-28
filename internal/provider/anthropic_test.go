@@ -533,3 +533,17 @@ func TestPromptCaching_LastToolGetsCacheControlWhenNoSystem(t *testing.T) {
 		t.Fatal("expected top-level cache_control")
 	}
 }
+
+func TestMessagesToAnthropic_SkipsEmptyAssistant(t *testing.T) {
+	msgs := []tp.Message{
+		{Role: tp.RoleUser, Content: "hi"},
+		{Role: tp.RoleAssistant, Content: ""},
+		{Role: tp.RoleUser, Content: "again"},
+	}
+	_, anthMsgs := messagesToAnthropic(msgs)
+	for _, m := range anthMsgs {
+		if m.Role == "assistant" {
+			t.Fatalf("empty assistant message was sent: %+v", m)
+		}
+	}
+}

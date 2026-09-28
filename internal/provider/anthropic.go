@@ -179,7 +179,10 @@ func messagesToAnthropic(msgs []t.Message) (system []anthSystemBlock, anthMsgs [
 					})
 				}
 				anthMsgs = append(anthMsgs, anthMessage{Role: "assistant", Content: blocks})
-			} else {
+			} else if m.Content != "" {
+				// An empty assistant turn (the model sometimes ends a turn
+				// with no content) is skipped: the API rejects empty
+				// assistant messages anywhere but the final position.
 				anthMsgs = append(anthMsgs, anthMessage{Role: "assistant", Content: m.Content})
 			}
 
