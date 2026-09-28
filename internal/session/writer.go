@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,8 +19,10 @@ import (
 // Writer handles incremental session saving to a stable file. Appends new
 // messages by default; falls back to a full rewrite when the header changes
 // (title set), on the first save, or when the in-memory log is shorter than
-// what's on disk (e.g. after compaction).
+// what's on disk (e.g. after compaction). Safe for concurrent use.
 type Writer struct {
+	mu sync.Mutex
+
 	id              string
 	model           string
 	cwd             string
@@ -106,17 +109,25 @@ func WriterForExisting(sess *Session) *Writer {
 func (w *Writer) ID() string { return w.id }
 
 // Tags returns the current tag list.
-func (w *Writer) Tags() []string { return w.tags }
+func (w *Writer) Tags() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.tags
+}
 
 // SetPreviousSession records the previous session UUID (used after compaction
 // to link the new session back to its predecessor).
 func (w *Writer) SetPreviousSession(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.previousSession = id
 	w.headerDirty = true
 }
 
 // SetTags replaces the session's tag list. Triggers a full-rewrite on the next Save.
 func (w *Writer) SetTags(tags []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.tags = tags
 	w.headerDirty = true
 }
@@ -124,6 +135,8 @@ func (w *Writer) SetTags(tags []string) {
 // SetTitle stores an LLM-generated title that overrides the truncated default.
 // Triggers a full-rewrite on the next Save.
 func (w *Writer) SetTitle(title string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if title == w.title {
 		return
 	}
@@ -140,6 +153,8 @@ var ErrConflict = fmt.Errorf("session file modified by another process; refusing
 // rewrite when the header changed, on first save, or when the in-memory log
 // is shorter than what's on disk.
 func (w *Writer) Save(messages []t.Message) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.conflicted {
 		return ErrConflict
 	}
