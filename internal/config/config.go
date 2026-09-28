@@ -122,9 +122,11 @@ func Load(path string) (*Config, error) {
 		return &cfg, nil
 	}
 
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	mergeMapDefaults(&cfg, md)
 
 	if err := validate(&cfg); err != nil {
 		return nil, err
@@ -132,6 +134,49 @@ func Load(path string) (*Config, error) {
 
 	applyMatchingDefaults(&cfg.Settings.Matching)
 	return &cfg, nil
+}
+
+// mergeMapDefaults restores default fields that a partial [tools.X] or
+// [providers.X] block left unset. The TOML decoder replaces a map entry's
+// whole struct, so e.g. [providers.openai] with only api_key_env would
+// otherwise wipe base_url.
+func mergeMapDefaults(cfg *Config, md toml.MetaData) {
+	def := Default()
+	for name, d := range def.Tools {
+		c, ok := cfg.Tools[name]
+		if !ok {
+			continue
+		}
+		if !md.IsDefined("tools", name, "approval") {
+			c.Approval = d.Approval
+		}
+		if !md.IsDefined("tools", name, "allow") {
+			c.Allow = d.Allow
+		}
+		if !md.IsDefined("tools", name, "deny") {
+			c.Deny = d.Deny
+		}
+		if !md.IsDefined("tools", name, "max_output_bytes") {
+			c.MaxOutputBytes = d.MaxOutputBytes
+		}
+		cfg.Tools[name] = c
+	}
+	for name, d := range def.Providers {
+		c, ok := cfg.Providers[name]
+		if !ok {
+			continue
+		}
+		if !md.IsDefined("providers", name, "base_url") {
+			c.BaseURL = d.BaseURL
+		}
+		if !md.IsDefined("providers", name, "api_key_env") {
+			c.APIKeyEnv = d.APIKeyEnv
+		}
+		if !md.IsDefined("providers", name, "headers") {
+			c.Headers = d.Headers
+		}
+		cfg.Providers[name] = c
+	}
 }
 
 func validate(c *Config) error {
