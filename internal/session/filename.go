@@ -35,9 +35,13 @@ func buildFilename(timestamp, id, repo, name string, temp bool) string {
 
 // parseFilename parses a session filename in the current format. ok is false
 // for anything that doesn't match — notably filenames written before this
-// format existed, which callers should handle with a legacy fallback.
+// format existed, which callers should handle with a legacy fallback, and
+// anything without a .jsonl extension (e.g. a leftover ".jsonl.tmp").
 func parseFilename(filename string) (f filenameFields, ok bool) {
-	base := strings.TrimSuffix(filename, ".jsonl")
+	base, found := strings.CutSuffix(filename, ".jsonl")
+	if !found {
+		return filenameFields{}, false
+	}
 	parts := strings.Split(base, filenameSep)
 	if len(parts) != 5 {
 		return filenameFields{}, false
