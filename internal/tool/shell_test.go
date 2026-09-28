@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShellTool_SimpleCommand(t *testing.T) {
@@ -66,5 +67,37 @@ func TestShellTool_Timeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestShellTool_TimeoutKillsChildren(t *testing.T) {
+	st := &ShellTool{}
+	start := time.Now()
+	_, err := st.Run(context.Background(), map[string]any{
+		"command": "sleep 6; echo done",
+		"timeout": float64(1),
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("timeout took %v; child process was not killed", elapsed)
+	}
+}
+
+func TestShellTool_BackgroundJobDoesNotBlock(t *testing.T) {
+	st := &ShellTool{}
+	start := time.Now()
+	res, err := st.Run(context.Background(), map[string]any{
+		"command": "echo started; sleep 5 &",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("background job blocked the tool for %v", elapsed)
+	}
+	if !strings.Contains(res.Content, "started") {
+		t.Errorf("output = %q, want it to contain %q", res.Content, "started")
 	}
 }
