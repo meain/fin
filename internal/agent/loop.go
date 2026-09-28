@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/meain/fin/internal/approval"
 	"github.com/meain/fin/internal/provider"
 	"github.com/meain/fin/internal/tool"
 	t "github.com/meain/fin/internal/types"
@@ -408,7 +409,10 @@ func (a *Agent) approveTool(tc t.ToolCall) (tool.Tool, map[string]any, error) {
 		args = map[string]any{}
 	}
 
-	if !a.approval.AutoApprove(tc.Name, args) {
+	switch a.approval.Decide(tc.Name, args) {
+	case approval.Deny:
+		return nil, args, fmt.Errorf("tool call denied by config")
+	case approval.Ask:
 		a.ui.ToolCallStart(tc.Name, args)
 		if !a.ui.ToolApprovalPrompt(tc.Name, args) {
 			return nil, nil, fmt.Errorf("tool call denied by user")
