@@ -89,7 +89,22 @@ type oaiStreamChunk struct {
 
 func messagesToOpenAI(msgs []t.Message) []oaiMessage {
 	out := make([]oaiMessage, 0, len(msgs))
+	// Images from tool results, held until the current run of consecutive
+	// tool messages ends: OpenAI requires every tool call to be answered by
+	// tool messages before any other message.
+	var pendingImages []oaiContentPart
+	flushImages := func() {
+		if len(pendingImages) == 0 {
+			return
+		}
+		parts := append([]oaiContentPart{{Type: "text", Text: "[Images from tool result]"}}, pendingImages...)
+		out = append(out, oaiMessage{Role: "user", Content: parts})
+		pendingImages = nil
+	}
 	for _, m := range msgs {
+		if m.Role != t.RoleTool {
+			flushImages()
+		}
 		om := oaiMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
@@ -130,27 +145,20 @@ func messagesToOpenAI(msgs []t.Message) []oaiMessage {
 		out = append(out, om)
 
 		// Tool results with images: OpenAI tool messages only accept string
-		// content, so inject images as a follow-up user message
-		if m.Role == t.RoleTool && len(m.Images) > 0 {
-			parts := make([]oaiContentPart, 0, len(m.Images)+1)
-			parts = append(parts, oaiContentPart{
-				Type: "text",
-				Text: "[Images from tool result]",
-			})
+		// content, so images go in a follow-up user message after the run
+		// of tool messages (see flushImages).
+		if m.Role == t.RoleTool {
 			for _, img := range m.Images {
-				parts = append(parts, oaiContentPart{
+				pendingImages = append(pendingImages, oaiContentPart{
 					Type: "image_url",
 					ImageURL: &oaiImageURL{
 						URL: "data:" + img.MediaType + ";base64," + img.Data,
 					},
 				})
 			}
-			out = append(out, oaiMessage{
-				Role:    "user",
-				Content: parts,
-			})
 		}
 	}
+	flushImages()
 	return out
 }
 

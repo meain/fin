@@ -365,3 +365,25 @@ func TestOpenAIRequestJSON(t *testing.T) {
 		t.Fatalf("expected 1 tool in JSON, got %v", decoded["tools"])
 	}
 }
+
+func TestMessagesToOpenAI_ToolImagesAfterAllToolResults(t *testing.T) {
+	msgs := []tp.Message{
+		{Role: tp.RoleAssistant, ToolCalls: []tp.ToolCall{{ID: "a", Name: "read"}, {ID: "b", Name: "read"}}},
+		{Role: tp.RoleTool, ToolCallID: "a", Content: "img a", Images: []tp.Image{{MediaType: "image/png", Data: "AAA"}}},
+		{Role: tp.RoleTool, ToolCallID: "b", Content: "img b", Images: []tp.Image{{MediaType: "image/png", Data: "BBB"}}},
+		{Role: tp.RoleAssistant, Content: "done"},
+	}
+	out := messagesToOpenAI(msgs)
+	var roles []string
+	for _, m := range out {
+		roles = append(roles, m.Role)
+	}
+	want := []string{"assistant", "tool", "tool", "user", "assistant"}
+	if strings.Join(roles, ",") != strings.Join(want, ",") {
+		t.Fatalf("roles = %v, want %v", roles, want)
+	}
+	parts := out[3].Content.([]oaiContentPart)
+	if len(parts) != 3 {
+		t.Fatalf("image message has %d parts, want 3 (text + 2 images)", len(parts))
+	}
+}
