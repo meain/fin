@@ -147,3 +147,19 @@ func TestReadTool_NonexistentFile(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestReadTool_NegativeOffsetOrLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := &ReadTool{}
+	for _, args := range []map[string]any{
+		{"path": path, "offset": float64(-1)},
+		{"path": path, "limit": float64(-5)},
+	} {
+		if _, err := rt.Run(context.Background(), args); err == nil {
+			t.Errorf("Run(%v) should fail", args)
+		}
+	}
+}

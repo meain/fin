@@ -493,3 +493,31 @@ func TestToolErrorWithOutput_IsTruncated(t *testing.T) {
 		t.Errorf("tool error content should end with the error, got tail %q", toolMsg.Content[len(toolMsg.Content)-60:])
 	}
 }
+
+type panicTool struct{}
+
+func (panicTool) Name() string               { return "boom" }
+func (panicTool) Description() string        { return "panics" }
+func (panicTool) Parameters() map[string]any { return map[string]any{} }
+func (panicTool) Run(context.Context, map[string]any) (tp.ToolResult, error) {
+	var s []int
+	_ = s[1]
+	return tp.ToolResult{}, nil
+}
+
+func TestToolPanic_BecomesErrorResult(t *testing.T) {
+	fp := &fakeProvider{streams: []provider.Stream{
+		streamWithToolCalls(tp.ToolCallDelta{Index: 0, ID: "c1", Name: "boom", Arguments: "{}"}),
+		streamWithText("handled"),
+	}}
+	cfg := config.Default()
+	cfg.Tools["boom"] = config.ToolConfig{Approval: "auto"}
+	agent := newTestAgent(fp, []tool.Tool{panicTool{}}, &cfg)
+
+	if err := agent.AddUserMessage(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := agent.Messages()[3].Content; !strings.Contains(got, "tool panicked") {
+		t.Errorf("tool message = %q, want a panic error", got)
+	}
+}
