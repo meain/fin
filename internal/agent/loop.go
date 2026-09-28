@@ -95,18 +95,10 @@ func (a *Agent) runTurn(ctx context.Context) (bool, error) {
 	}
 
 	turnStart := time.Now()
-	stream, err := a.streamWithRetry(ctx, req)
+	assistantMsg, ttft, err := a.streamWithRetry(ctx, req)
 	if err != nil {
 		a.ui.EndStream()
 		return false, err
-	}
-
-	streamStart := time.Now()
-	assistantMsg, ttft, err := a.consumeStream(stream, streamStart)
-	stream.Close()
-	if err != nil {
-		a.ui.EndStream()
-		return false, fmt.Errorf("stream error: %w", err)
 	}
 
 	a.ui.EndStream()
@@ -330,12 +322,12 @@ func errorWithContext(tl tool.Tool, name string, args map[string]any, err error)
 
 // consumeStream drains a stream, accumulating text, tool-call fragments,
 // and usage into one assistant Message. ttft is the time from streamStart
-// to the first non-empty content or tool-call delta.
-func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (t.Message, time.Duration, error) {
-	msg := t.Message{Role: t.RoleAssistant, Model: a.model, Timestamp: time.Now()}
+// to the first non-empty content or tool-call delta; started reports
+// whether any such delta arrived (even when an error follows).
+func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (msg t.Message, ttft time.Duration, started bool, err error) {
+	msg = t.Message{Role: t.RoleAssistant, Model: a.model, Timestamp: time.Now()}
 	var contentBuf strings.Builder
 	var msgUsage t.Usage
-	var ttft time.Duration
 
 	toolCalls := map[int]*t.ToolCall{}
 
@@ -345,10 +337,11 @@ func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (t.
 			if err == io.EOF {
 				break
 			}
-			return msg, ttft, err
+			return msg, ttft, started, err
 		}
 
-		if ttft == 0 && (delta.Content != "" || len(delta.ToolCalls) > 0) {
+		if !started && (delta.Content != "" || len(delta.ToolCalls) > 0) {
+			started = true
 			ttft = time.Since(streamStart)
 		}
 
@@ -405,7 +398,7 @@ func (a *Agent) consumeStream(stream provider.Stream, streamStart time.Time) (t.
 		}
 	}
 
-	return msg, ttft, nil
+	return msg, ttft, started, nil
 }
 
 // approveTool looks up a tool by name, parses its JSON arguments, and

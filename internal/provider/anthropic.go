@@ -434,7 +434,7 @@ func handleAnthropicErrorEvent(data string) error {
 	if !ok {
 		return fmt.Errorf("anthropic stream error: %s", data)
 	}
-	return fmt.Errorf("anthropic error: %s: %s", ev.Error.Type, ev.Error.Message)
+	return &StreamError{Provider: "anthropic", Type: ev.Error.Type, Message: ev.Error.Message}
 }
 
 // decodeOrSkip unmarshals data into a value of type T. Returns false when
