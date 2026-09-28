@@ -262,14 +262,16 @@ func Run() int {
 		cfg.Models.Secondary = *secondaryModel
 	}
 
-	outMode := ui.ParseOutputMode(cfg.Settings.UI)
+	uiSetting := cfg.Settings.UI
 	if *uiMode != "" {
-		outMode = ui.ParseOutputMode(*uiMode)
+		uiSetting = *uiMode
 	}
+	outMode := ui.ParseOutputMode(uiSetting)
 
 	// jsonMode drives a machine-readable JSONL frontend (GUI apps). stdin is
 	// reserved for approval replies, so piped-input detection is skipped below.
-	jsonMode := *uiMode == "json"
+	// Honored from both -ui and settings.ui.
+	jsonMode := uiSetting == "json"
 
 	// Auto-detect piped stdout: suppress chrome, only stream response text.
 	// Explicit -ui flag overrides this.
