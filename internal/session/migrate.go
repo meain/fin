@@ -90,7 +90,16 @@ func Migrate() (MigrateResult, error) {
 			}
 			content := append(headerJSON, '\n')
 			content = append(content, rest...)
-			if err := os.WriteFile(newPath, content, 0644); err != nil {
+			// Write to a temp file and rename so a crash or full disk can't
+			// leave a truncated session behind.
+			tmp := newPath + ".tmp"
+			if err := os.WriteFile(tmp, content, 0644); err != nil {
+				os.Remove(tmp)
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: write failed: %v", e.Name(), err))
+				continue
+			}
+			if err := os.Rename(tmp, newPath); err != nil {
+				os.Remove(tmp)
 				result.Errors = append(result.Errors, fmt.Sprintf("%s: write failed: %v", e.Name(), err))
 				continue
 			}
