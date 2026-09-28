@@ -156,10 +156,8 @@ func TestMessagesToAnthropic_ToolResult(t *testing.T) {
 }
 
 func TestMessagesToAnthropic_ToolResultError(t *testing.T) {
-	// Matches the actual format produced by agent.errorWithContext:
-	// "Error (<context>): <err>" — not a bare "Error: " prefix.
 	msgs := []tp.Message{
-		{Role: tp.RoleTool, Content: "Error (shell $ foo): something went wrong", ToolCallID: "tc_1"},
+		{Role: tp.RoleTool, Content: "partial output\nError (shell $ foo): timed out", ToolCallID: "tc_1", IsError: true},
 	}
 	_, anthMsgs := messagesToAnthropic(msgs)
 	blocks := anthMsgs[0].Content.([]anthContentBlock)
@@ -545,5 +543,16 @@ func TestMessagesToAnthropic_SkipsEmptyAssistant(t *testing.T) {
 		if m.Role == "assistant" {
 			t.Fatalf("empty assistant message was sent: %+v", m)
 		}
+	}
+}
+
+func TestMessagesToAnthropic_ErrorLikeContentIsNotAnError(t *testing.T) {
+	// A successful read of a file that happens to start with "Error (".
+	msgs := []tp.Message{
+		{Role: tp.RoleTool, Content: "Error (x): this is just file content", ToolCallID: "tc_1"},
+	}
+	_, anthMsgs := messagesToAnthropic(msgs)
+	if anthMsgs[0].Content.([]anthContentBlock)[0].IsError {
+		t.Fatal("IsError should follow the message flag, not the content")
 	}
 }
