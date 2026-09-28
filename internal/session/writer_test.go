@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -62,5 +63,50 @@ func TestWriter_ConcurrentSaveNoConflict(t *testing.T) {
 	}
 	if len(sess.Messages) != len(msgs) {
 		t.Errorf("got %d messages on disk, want %d", len(sess.Messages), len(msgs))
+	}
+}
+
+// An empty session file must never be picked up by -c or cause
+// WriterForExisting to target an unrelated session.
+func TestEmptySessionFileIsSkipped(t *testing.T) {
+	home := t.TempDir()
+	sessDir := filepath.Join(home, ".local", "share", "fin", "sessions")
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	realID := "aaaa1111-0000-0000-0000-000000000000"
+	writeTestSession(t, sessDir, realID, 2*time.Hour, 5)
+	empty := filepath.Join(sessDir, buildFilename("20990101-000000", "bbbb2222-0000-0000-0000-000000000000", "", "", false))
+	if err := os.WriteFile(empty, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readFile(empty); err == nil {
+		t.Error("readFile on an empty file should fail")
+	}
+
+	sess, err := LoadLast()
+	if err != nil {
+		t.Fatalf("LoadLast: %v", err)
+	}
+	if sess.ID != realID {
+		t.Fatalf("LoadLast picked %q, want %q", sess.ID, realID)
+	}
+
+	w := WriterForExisting(&Session{})
+	if w.ID() == "" {
+		t.Error("WriterForExisting with empty ID should generate a new ID")
+	}
+	if err := w.Save([]t2.Message{{Role: t2.RoleUser, Content: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	orig, err := LoadByID(realID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orig.Messages) != 5 {
+		t.Errorf("real session has %d messages after unrelated save, want 5", len(orig.Messages))
 	}
 }

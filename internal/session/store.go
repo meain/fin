@@ -132,12 +132,18 @@ func LoadByName(name string) (*Session, error) {
 }
 
 // LoadLast loads the most recently modified permanent (non-temp) session.
+// Unreadable files (empty, missing header) are skipped.
 func LoadLast() (*Session, error) {
 	es, err := permanentEntries()
 	if err != nil || len(es) == 0 {
 		return nil, fmt.Errorf("no sessions found")
 	}
-	return readFile(es[0].path)
+	for _, e := range es {
+		if sess, err := readFile(e.path); err == nil {
+			return sess, nil
+		}
+	}
+	return nil, fmt.Errorf("no readable sessions found")
 }
 
 // LoadLastTemp loads the most recently modified temporary session.
@@ -147,8 +153,11 @@ func LoadLastTemp() (*Session, error) {
 		return nil, fmt.Errorf("no sessions found")
 	}
 	for _, e := range all {
-		if e.temp {
-			return readFile(e.path)
+		if !e.temp {
+			continue
+		}
+		if sess, err := readFile(e.path); err == nil {
+			return sess, nil
 		}
 	}
 	return nil, fmt.Errorf("no temp sessions found")
@@ -172,17 +181,18 @@ func LoadLastWithFilter(tag, repo string) (*Session, error) {
 		if repo != "" && e.repo != repo {
 			continue
 		}
-		if tag == "" {
-			return readFile(e.path)
+		if tag != "" {
+			h, err := readHeader(e.path)
+			if err != nil {
+				continue
+			}
+			if slices.Contains(h.Tags, tag) == exclude {
+				continue
+			}
 		}
-		h, err := readHeader(e.path)
-		if err != nil {
-			continue
+		if sess, err := readFile(e.path); err == nil {
+			return sess, nil
 		}
-		if slices.Contains(h.Tags, tag) == exclude {
-			continue
-		}
-		return readFile(e.path)
 	}
 	if exclude {
 		return nil, fmt.Errorf("no session without tag %q found", tag)
