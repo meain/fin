@@ -304,7 +304,7 @@ func Run() int {
 	var resumedSession *session.Session
 	var forkParentID string // set when -fork is used
 	var sw *session.Writer
-	if *name != "" {
+	if *name != "" && !*fork {
 		sess, err := session.LoadByName(*name)
 		if err == nil {
 			resumedSession = sess
