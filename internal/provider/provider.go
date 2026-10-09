@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"syscall"
 
 	t "github.com/meain/fin/internal/types"
@@ -37,6 +38,10 @@ func New(name string, cfg Config) (Provider, error) {
 	apiKey := os.Getenv(cfg.APIKeyEnv)
 	if cfg.APIKeyEnv != "" && apiKey == "" {
 		return nil, fmt.Errorf("env var %s not set", cfg.APIKeyEnv)
+	}
+
+	if usesOpenRouter(name, cfg.BaseURL) {
+		cfg.Headers = withOpenRouterAttribution(cfg.Headers)
 	}
 
 	var httpClient *http.Client
@@ -155,4 +160,35 @@ func (tr *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		req.Header.Set(k, v)
 	}
 	return tr.base.RoundTrip(req)
+}
+
+// openRouterHost is the base URL fragment that identifies OpenRouter's API.
+const openRouterHost = "openrouter.ai"
+
+// usesOpenRouter reports whether the provider talks to OpenRouter, matching
+// either the provider name or the base URL.
+func usesOpenRouter(name, baseURL string) bool {
+	return name == "openrouter" || strings.Contains(strings.ToLower(baseURL), openRouterHost)
+}
+
+// withOpenRouterAttribution returns headers with OpenRouter app-attribution
+// defaults filled in for any header the caller didn't already set. OpenRouter
+// identifies the app via HTTP-Referer (required, becomes the app's URL) and
+// X-OpenRouter-Title (display name); X-OpenRouter-Categories places the app in
+// the marketplace. Explicit config headers win over these defaults.
+func withOpenRouterAttribution(headers map[string]string) map[string]string {
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	attribution := map[string]string{
+		"HTTP-Referer":            "https://github.com/meain/fin",
+		"X-OpenRouter-Title":      "fin",
+		"X-OpenRouter-Categories": "cli-agent",
+	}
+	for k, v := range attribution {
+		if _, set := headers[k]; !set {
+			headers[k] = v
+		}
+	}
+	return headers
 }

@@ -86,3 +86,65 @@ func TestNew_CustomHeaders(t *testing.T) {
 		t.Fatal("expected non-nil httpClient with custom headers")
 	}
 }
+
+func TestNew_OpenRouter_AttributionHeaders(t *testing.T) {
+	t.Setenv("TEST_OR_KEY", "sk-test-key")
+	p, err := New("openrouter", Config{
+		APIKeyEnv: "TEST_OR_KEY",
+		BaseURL:   "https://openrouter.ai/api",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	oai, ok := p.(*openaiProvider)
+	if !ok {
+		t.Fatalf("expected *openaiProvider for openrouter, got %T", p)
+	}
+	if oai.httpClient == nil {
+		t.Fatal("expected httpClient with attribution headers")
+	}
+	tr, ok := oai.httpClient.Transport.(*headerTransport)
+	if !ok {
+		t.Fatalf("expected *headerTransport, got %T", oai.httpClient.Transport)
+	}
+	for _, h := range []string{"HTTP-Referer", "X-OpenRouter-Title", "X-OpenRouter-Categories"} {
+		if tr.headers[h] == "" {
+			t.Errorf("expected attribution header %q to be set, got empty", h)
+		}
+	}
+}
+
+func TestWithOpenRouterAttribution_UserHeadersWin(t *testing.T) {
+	h := withOpenRouterAttribution(map[string]string{
+		"HTTP-Referer":       "https://example.com/mine",
+		"X-OpenRouter-Title": "my-app",
+	})
+	if h["HTTP-Referer"] != "https://example.com/mine" {
+		t.Errorf("explicit HTTP-Referer should win, got %q", h["HTTP-Referer"])
+	}
+	if h["X-OpenRouter-Title"] != "my-app" {
+		t.Errorf("explicit X-OpenRouter-Title should win, got %q", h["X-OpenRouter-Title"])
+	}
+	if h["X-OpenRouter-Categories"] != "cli-agent" {
+		t.Errorf("expected default cli-agent category, got %q", h["X-OpenRouter-Categories"])
+	}
+}
+
+func TestUsesOpenRouter(t *testing.T) {
+	cases := []struct {
+		name, baseURL string
+		want          bool
+	}{
+		{"openrouter", "", true},
+		{"", "https://openrouter.ai/api", true},
+		{"", "https://OPENROUTER.AI/api", true},
+		{"openai", "https://api.openai.com", false},
+		{"ollama", "http://localhost:11434", false},
+		{"", "https://example.com", false},
+	}
+	for _, c := range cases {
+		if got := usesOpenRouter(c.name, c.baseURL); got != c.want {
+			t.Errorf("usesOpenRouter(%q, %q) = %v, want %v", c.name, c.baseURL, got, c.want)
+		}
+	}
+}

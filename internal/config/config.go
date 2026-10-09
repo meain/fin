@@ -85,6 +85,10 @@ func Default() Config {
 				BaseURL:   "https://api.openai.com",
 				APIKeyEnv: "OPENAI_API_KEY",
 			},
+			"openrouter": {
+				BaseURL:   "https://openrouter.ai/api",
+				APIKeyEnv: "OPENROUTER_API_KEY",
+			},
 		},
 		Tools: map[string]ToolConfig{
 			"read":      {Approval: "auto"},

@@ -84,7 +84,7 @@ TOML at `~/.config/fin/config.toml`:
 ## Features
 
 ### Multi-provider LLM support
-Anthropic Claude, OpenAI, and any OpenAI-compatible API (Groq, OpenRouter, Ollama, local models). All via raw HTTP — no provider SDKs. Configurable per-provider base URLs, API keys, and custom headers.
+Anthropic Claude, OpenAI, and any OpenAI-compatible API (Groq, OpenRouter, Ollama, local models). All via raw HTTP — no provider SDKs. Configurable per-provider base URLs, API keys, and custom headers. OpenRouter requests get app-attribution headers (`HTTP-Referer`, `X-OpenRouter-Title`, `X-OpenRouter-Categories`) injected by default; set the same headers in `[providers.openrouter]` to override.
 
 ### Built-in tools
 - **read** — files with line numbers, images (base64 for vision models), directory trees
